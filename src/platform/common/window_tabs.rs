@@ -1200,7 +1200,13 @@ impl<A: WindowAccess> WindowAccess for Grouped<A> {
         }
         let windows: Vec<_> = windows
             .into_iter()
-            .map(|w| self.snapshot(w.id, screens).map_or(w, |s| s.info))
+            .map(|w| {
+                if self.groups.state.containing(w.id).is_some() {
+                    self.snapshot(w.id, screens).map_or(w, |s| s.info)
+                } else {
+                    w
+                }
+            })
             .filter(|w| self.scope.is_none_or(|scope| scope.contains(w)))
             .collect();
         // Scope filtering (especially minimizing during size_cycle) is not
@@ -1231,13 +1237,17 @@ impl<A: WindowAccess> WindowAccess for Grouped<A> {
     fn snapshot(&self, id: WindowId, screens: &[Screen]) -> Result<Snapshot, String> {
         let mut snapshot = self.native.snapshot(id, screens)?;
         if let Some(group) = self.groups.state.containing(id) {
-            let active = self.native.snapshot(group.active, screens)?;
-            let header = self.header_height(active.info.screen, screens);
-            snapshot.info.bounds = Self::outer_frame(active.info.bounds, header);
-            snapshot.info.screen = active.info.screen;
-            snapshot.info.minimized = active.info.minimized;
-            snapshot.info.maximized = active.info.maximized;
-            snapshot.restored = Self::outer_frame(active.restored, header);
+            if group.active != id {
+                let active = self.native.snapshot(group.active, screens)?;
+                snapshot.info.bounds = active.info.bounds;
+                snapshot.info.screen = active.info.screen;
+                snapshot.info.minimized = active.info.minimized;
+                snapshot.info.maximized = active.info.maximized;
+                snapshot.restored = active.restored;
+            }
+            let header = self.header_height(snapshot.info.screen, screens);
+            snapshot.info.bounds = Self::outer_frame(snapshot.info.bounds, header);
+            snapshot.restored = Self::outer_frame(snapshot.restored, header);
         }
         Ok(snapshot)
     }
@@ -1256,10 +1266,32 @@ impl<A: WindowAccess> WindowAccess for Grouped<A> {
         } else {
             rect
         };
-        self.native.set_frame(active, rect, screens, cancelled)?;
-        let result = self.snapshot(id, screens)?.info;
-        self.cache_observed(screens);
-        self.publish(screens)?;
+        let applied = self.native.set_frame(active, rect, screens, cancelled)?;
+        if self.groups.state.containing(id).is_none() {
+            return Ok(applied);
+        }
+        // A geometry write cannot change membership. Read only the active
+        // member, retaining unrelated groups' metadata and hidden geometry.
+        let actual = self.native.snapshot(active, screens)?;
+        let mut result = if active == id {
+            actual.info.clone()
+        } else {
+            self.native.snapshot(id, screens)?.info
+        };
+        result.bounds = Self::outer_frame(
+            actual.info.bounds,
+            self.header_height(actual.info.screen, screens),
+        );
+        result.screen = actual.info.screen;
+        result.minimized = actual.info.minimized;
+        result.maximized = actual.info.maximized;
+        self.observed.insert(active, actual);
+        if self.screens != screens {
+            // A display topology/DPI change also affects other groups' bars.
+            self.publish(screens)?;
+        } else {
+            self.publish_changed(&BTreeSet::from([active]), screens)?;
+        }
         Ok(result)
     }
     fn restore(

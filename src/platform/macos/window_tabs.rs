@@ -200,30 +200,33 @@ pub(super) fn refresh(mtm: MainThreadMarker, screens: &[Screen]) {
                 strip.targets = targets;
                 strip.tabs = bar.tabs.clone();
             }
-            let width = (bar.bounds.width - 74.0).max(1.0) / bar.tabs.len().max(1) as f64;
-            for (i, button) in strip.buttons.iter().enumerate() {
-                let close = i == bar.tabs.len();
-                if layout_changed {
-                    button.setFrame(NSRect::new(
-                        NSPoint::new(
-                            if close {
-                                bar.bounds.width - 30.0
+            // Position-only follows leave all AppKit controls untouched.
+            if layout_changed || selection_changed {
+                let width = (bar.bounds.width - 74.0).max(1.0) / bar.tabs.len().max(1) as f64;
+                for (i, button) in strip.buttons.iter().enumerate() {
+                    let close = i == bar.tabs.len();
+                    if layout_changed {
+                        button.setFrame(NSRect::new(
+                            NSPoint::new(
+                                if close {
+                                    bar.bounds.width - 30.0
+                                } else {
+                                    44.0 + i as f64 * width
+                                },
+                                0.0,
+                            ),
+                            NSSize::new(if close { 30.0 } else { width }, 30.0),
+                        ));
+                    }
+                    if selection_changed {
+                        button.setState(
+                            if bar.tabs.get(i).is_some_and(|(id, _, _)| *id == bar.active) {
+                                1
                             } else {
-                                44.0 + i as f64 * width
+                                0
                             },
-                            0.0,
-                        ),
-                        NSSize::new(if close { 30.0 } else { width }, 30.0),
-                    ));
-                }
-                if selection_changed {
-                    button.setState(
-                        if bar.tabs.get(i).is_some_and(|(id, _, _)| *id == bar.active) {
-                            1
-                        } else {
-                            0
-                        },
-                    );
+                        );
+                    }
                 }
             }
             strip.layout_width = bar.bounds.width;

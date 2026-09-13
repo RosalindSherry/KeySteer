@@ -1452,6 +1452,64 @@ fn tabs_geometry_baseline() {
 }
 
 #[test]
+fn keyboard_geometry_reads_only_active_member_and_preserves_other_groups() {
+    let mut access = two_groups();
+    let active = access.groups.state.groups[0].active;
+    let group = access.groups.state.groups[0].id;
+    let other = access.native.bars[1].clone();
+    let hidden: Vec<_> = access
+        .native
+        .hidden
+        .iter()
+        .map(|id| (*id, access.native.windows[id].info.bounds))
+        .collect();
+    access.native.snapshot_reads.set(0);
+    access.native.updates.clear();
+    let mut frame = access.snapshot(active, &screens()).unwrap().info.bounds;
+    assert_eq!(access.native.snapshot_reads.get(), 1);
+    access.native.snapshot_reads.set(0);
+    for _ in 0..20 {
+        frame.x += 1.0;
+        frame.width += 1.0;
+        let actual = access
+            .set_frame(active, frame, &screens(), &|| false)
+            .unwrap();
+        assert_eq!(actual.bounds, frame);
+    }
+    // One read in Fake::set_frame and one confirmed active snapshot; independent
+    // of the number of hidden members and unrelated groups.
+    assert_eq!(access.native.snapshot_reads.get(), 40);
+    assert_eq!(access.native.updates, vec![group; 20]);
+    assert_eq!(access.native.bars[1], other);
+    for (id, bounds) in hidden {
+        assert_eq!(access.native.windows[&id].info.bounds, bounds);
+    }
+    access.native.fail = Some(active);
+    let before = access.native.bars.clone();
+    assert!(
+        access
+            .set_frame(
+                active,
+                Rect::new(0.0, 0.0, 500.0, 400.0),
+                &screens(),
+                &|| false
+            )
+            .is_err()
+    );
+    assert_eq!(access.native.bars, before);
+}
+
+#[test]
+fn ungrouped_inventory_reuses_native_results() {
+    let mut access = setup();
+    access.enumerate(&screens(), &|| false).unwrap();
+    access.native.snapshot_reads.set(0);
+    let windows = access.enumerate(&screens(), &|| false).unwrap();
+    assert_eq!(windows.len(), 4);
+    assert_eq!(access.native.snapshot_reads.get(), 0);
+}
+
+#[test]
 fn geometry_updates_only_affected_group_and_retries_failed_publication() {
     let mut access = two_groups();
     let active = access.groups.state.groups[0].active;

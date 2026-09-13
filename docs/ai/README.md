@@ -89,3 +89,6 @@ Shift+V+M 系统静音默认绑定与合并提示见 [配置](03-configuration.m
 
 
 Window 连续移动的指针稳定、亚像素累积和显示帧等待见 [性能](07-rendering-and-performance.md) 与 [验证](08-build-docs-and-tests.md)。
+
+
+Editor/Tabs 按键几何更新的跨平台局部发布、快照复用及尚存的等待限制见 [性能](07-rendering-and-performance.md)。

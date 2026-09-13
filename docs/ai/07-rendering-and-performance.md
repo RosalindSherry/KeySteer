@@ -333,3 +333,22 @@ Common 将应用与系统的音量合为一行、输出设备合为一行，静�
 
 
 Window 连续 Move/Resize 不回写鼠标位置；Tab 选择和跨屏等离散操作仍保留其既有指针行为。Move 以手势、目标、比例和实际矩形校验亚像素余量，跨帧累积后取整，边界夹紧不积欠位移；无几何变化不写原生窗口。按住移动键期间暂停普通库存请求，几何结果继续更新视图。Windows 几何确认等待 DWM 帧，不再以固定 10ms sleep 限制回读。显示帧仍由既有原生 compositor/VBlank 时钟驱动，本轮未增加定时器。
+
+
+## Keyboard-driven grouped geometry
+
+Grouped::set_frame shares the same local publication path on Windows and macOS.
+After a successful native write, it reads the active member once, updates only
+that observed snapshot, and publishes the affected bar. Hidden members retain
+their frames until activation; unrelated groups retain their metadata. A display
+topology change still republishes all bars. Failed writes must not publish the
+requested frame as if it were confirmed. Grouped snapshots do not read an active
+member twice, and ordinary inventory entries reuse the native enumeration result.
+AppKit position-only bar updates skip button layout and selection traversal.
+
+These changes remove redundant work, not native confirmation waits. Windows
+frame confirmation and macOS activation/fullscreen transitions still contain
+blocking waits; the Window inventory timer also remains. Fully event-driven
+completion requires preserving layout rejection/rollback and hidden-tab reveal
+ordering, and is not implemented by this optimization. No macOS native acceptance
+is claimed.
