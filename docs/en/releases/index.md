@@ -1,5 +1,12 @@
 # Release notes
 
+## 0.10.1
+
+**Improved window movement and closing**
+
+- **Steadier movement**: continuously moving or resizing a window no longer repeatedly repositions the pointer. Small movements accumulate across frames instead of being lost to rounding at high refresh rates.
+- **Cleanup after closing**: fixed an issue where borders and window numbers could remain after closing a window with `X`.
+
 ## 0.10.0
 
 **Major feature update: from pointer control to a complete keyboard-driven workspace.** KeySteer now includes a full window-management workflow for moving, splitting, tiling, grouping, and reusing layouts.

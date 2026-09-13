@@ -566,3 +566,16 @@ test('application and system audio controls are separate and default-device cycl
     assert.equal(JSON.stringify(state.window.windows), geometry)
   }
 })
+
+
+test('closing a window compacts numbers without changing survivor order', () => {
+  const state = createSimulatorState(); enterWindow(state)
+  const ordered = Object.entries(state.window.numbers).sort((a, b) => a[1] - b[1]).map(([id]) => Number(id))
+  assert.ok(ordered.length >= 3)
+  state.window.target = ordered[1]
+  applyWindowAction(state, 'window_close')
+  refreshWindowNumbers(state.window)
+  assert.equal(state.window.numbers[ordered[1]], undefined)
+  const survivors = ordered.filter(id => id !== ordered[1])
+  assert.deepEqual(survivors.map(id => state.window.numbers[id]), survivors.map((_, i) => i + 1))
+})

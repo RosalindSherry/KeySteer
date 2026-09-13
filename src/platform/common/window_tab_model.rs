@@ -236,6 +236,15 @@ impl Groups {
             Self::remove_member(group, id);
         }
         self.state.numbers.retain(|(window, _)| *window != id);
+        // Preserve relative order while reclaiming the removed window's slot.
+        self.state
+            .numbers
+            .sort_unstable_by_key(|(_, number)| *number);
+        for (index, (_, number)) in self.state.numbers.iter_mut().enumerate() {
+            *number = index as u32 + 1;
+        }
+        self.next_number = self.state.numbers.len() as u32;
+
         if self.state.active == Some(id) {
             self.state.active = None;
         }

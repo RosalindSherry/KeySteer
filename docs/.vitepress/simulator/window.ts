@@ -254,7 +254,13 @@ export function refreshWindowNumbers(w: WindowState): void {
   pruneTabGroups(w)
   const windows = snapshot(w).filter(v => eligibleWindow(w, v))
   // Minimized/out-of-scope windows keep their reservation until they close.
-  for (const id of Object.keys(w.numbers)) if (!w.windows.some(v => v.id === Number(id))) delete w.numbers[Number(id)]
+  const removed = Object.keys(w.numbers).filter(id => !w.windows.some(v => v.id === Number(id)))
+  for (const id of removed) delete w.numbers[Number(id)]
+  if (removed.length) {
+    const ordered = Object.entries(w.numbers).sort((a, b) => a[1] - b[1])
+    ordered.forEach(([id], index) => { w.numbers[Number(id)] = index + 1 })
+    w.nextNumber = ordered.length + 1
+  }
   const first = new Map<string, number>()
   for (const window of windows) if (w.numbers[window.id] !== undefined) {
     const app = window.app.toLowerCase()

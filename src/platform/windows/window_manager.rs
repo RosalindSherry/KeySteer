@@ -404,7 +404,10 @@ impl Windows {
             }
             previous = Some(bounds);
             super::window_tabs::NativeTabs::dispatch_messages();
-            std::thread::sleep(Duration::from_millis(10));
+            // Wait on the compositor rather than quantizing movement to a
+            // fixed sleep interval. Keep the existing cancellation/deadline checks.
+            super::native::wait_for_dwm_frame()
+                .map_err(|e| format!("window frame wait failed: {e}"))?;
         }
     }
 }

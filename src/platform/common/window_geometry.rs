@@ -1,6 +1,38 @@
 //! Pure placement geometry, in the backend's screen coordinate system.
 use crate::api::{Point, Rect, Screen};
 
+/// Carry fractional native pixels across display frames; clipping must not
+/// accumulate motion debt that would delay reversing direction at an edge.
+pub(crate) fn move_with_remainder(
+    base: Rect,
+    area: Rect,
+    delta: Point,
+    remainder: Point,
+) -> (Rect, Point) {
+    let requested = constrain_move(
+        Rect::new(
+            base.x + delta.x + remainder.x,
+            base.y + delta.y + remainder.y,
+            base.width,
+            base.height,
+        ),
+        area,
+    );
+    let rounded = constrain_move(
+        Rect::new(
+            requested.x.round(),
+            requested.y.round(),
+            base.width,
+            base.height,
+        ),
+        area,
+    );
+    (
+        rounded,
+        Point::new(requested.x - rounded.x, requested.y - rounded.y),
+    )
+}
+
 pub(crate) fn screen_index(screens: &[Screen], rect: Rect) -> Option<usize> {
     screens
         .iter()
@@ -245,5 +277,28 @@ mod tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod motion_precision_tests {
+    use super::*;
+    #[test]
+    fn display_rates_preserve_distance_and_edge_reversal() {
+        let area = Rect::new(0.0, 0.0, 2000.0, 1000.0);
+        for hz in [60, 75, 120, 144, 165, 240, 360, 500] {
+            let mut frame = Rect::new(100.0, 100.0, 300.0, 200.0);
+            let mut remainder = Point::default();
+            for _ in 0..hz {
+                (frame, remainder) =
+                    move_with_remainder(frame, area, Point::new(100.0 / hz as f64, 0.0), remainder);
+            }
+            assert_eq!(frame.x, 200.0, "{hz}Hz");
+        }
+        let edge = Rect::new(1700.0, 0.0, 300.0, 200.0);
+        let (edge, remainder) =
+            move_with_remainder(edge, area, Point::new(100.0, 0.0), Point::default());
+        let (back, _) = move_with_remainder(edge, area, Point::new(-1.0, 0.0), remainder);
+        assert_eq!(back.x, 1699.0);
     }
 }

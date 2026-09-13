@@ -29,6 +29,24 @@ impl WindowSession {
             self.numbers.remove(id);
             removed |= self.inventory.remove(id).is_some();
         }
+        if !result.closed.is_empty() {
+            let mut ordered: Vec<_> = self.numbers.iter().map(|(id, n)| (*id, *n)).collect();
+            ordered.sort_unstable_by_key(|(_, n)| *n);
+            self.numbers = ordered
+                .into_iter()
+                .enumerate()
+                .map(|(i, (id, _))| (id, i as u32 + 1))
+                .collect();
+            self.next_number = self.numbers.len() as u32 + 1;
+            self.inventory_dirty = true;
+            if self
+                .target
+                .as_ref()
+                .is_some_and(|w| result.closed.contains(&w.id))
+            {
+                self.status = None;
+            }
+        }
         self.inventory_dirty |= removed;
         changed |= removed;
         if self.refresh_pending == Some(result.id) {

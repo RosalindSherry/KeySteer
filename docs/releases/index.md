@@ -1,5 +1,17 @@
 # 更新日志 / Release Notes
 
+## 0.10.1
+
+**改进窗口移动、关闭**
+
+- **移动更稳定**：连续移动和缩放窗口时不再反复拉动鼠标；细小位移跨帧累积，避免高刷新率下取整丢失。
+- **关闭后及时清理**：修复按 `X` 关闭窗口后，边框和编号仍可能残留的问题。
+
+**Improved window movement and closing**
+
+- **Steadier movement**: continuously moving or resizing a window no longer repeatedly repositions the pointer. Small movements accumulate across frames instead of being lost to rounding at high refresh rates.
+- **Cleanup after closing**: fixed an issue where borders and window numbers could remain after closing a window with `X`.
+
 ## 0.10.0
 
 **重要功能更新：从操控鼠标，到安排整个工作区。** KeySteer 新增完整的窗口管理模式，移动、分屏、平铺、标签分组与布局复用，都可以留在键盘上完成。

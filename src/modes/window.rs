@@ -262,6 +262,7 @@ impl WindowSession {
 
     fn refresh(&mut self, out: &mut CommandBatch) {
         if self.refresh_pending.is_none()
+            && self.held.is_empty()
             && !self.temporary
             && self
                 .edit

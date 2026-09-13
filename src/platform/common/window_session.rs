@@ -676,6 +676,7 @@ struct Session {
     error: Option<String>,
     pending_closed: Vec<WindowId>,
     resize_minimum: Option<(WindowId, u64, usize, f64, Point)>,
+    move_remainder: Option<(WindowId, u64, f64, Rect, Point)>,
 }
 
 struct EditTransaction {
@@ -938,6 +939,16 @@ impl Session {
         result.closed = access.take_closed();
         result.closed.append(&mut self.pending_closed);
         if !result.closed.is_empty() {
+            if let Some(windows) = &mut result.windows {
+                windows.retain(|window| !result.closed.contains(&window.id));
+            }
+            if result
+                .target
+                .as_ref()
+                .is_some_and(|w| result.closed.contains(&w.id))
+            {
+                result.target = None;
+            }
             for id in &result.closed {
                 self.minimums.remove(id);
                 self.initial.remove(id);
@@ -1460,22 +1471,38 @@ impl Session {
                 } else {
                     before.info.bounds
                 };
-                let pointer = access.pointer().ok();
+                // Continuous geometry must not replay a stale cursor position.
+                let pointer = (!matches!(
+                    change,
+                    WindowChange::Move { .. } | WindowChange::Resize { .. }
+                ))
+                .then(|| access.pointer().ok())
+                .flatten();
                 let resize_center =
                     matches!(change, WindowChange::Resize { .. }).then_some(base.center());
                 let change_result = match change {
                     WindowChange::CycleState => access.cycle_state(target, screens, cancelled),
                     change => {
                         let next = match change {
-                            WindowChange::Move { dx, dy } => geometry::constrain_move(
-                                Rect::new(
-                                    base.x + dx * scale,
-                                    base.y + dy * scale,
-                                    base.width,
-                                    base.height,
-                                ),
-                                screen.work_area,
-                            ),
+                            WindowChange::Move { dx, dy } => {
+                                let remainder = self
+                                    .move_remainder
+                                    .filter(|(id, gesture, dpi, last, _)| {
+                                        *id == target
+                                            && *gesture == group
+                                            && *dpi == scale
+                                            && *last == base
+                                    })
+                                    .map_or(Point::default(), |(_, _, _, _, remainder)| remainder);
+                                let (next, remainder) = geometry::move_with_remainder(
+                                    base,
+                                    screen.work_area,
+                                    Point::new(dx * scale, dy * scale),
+                                    remainder,
+                                );
+                                self.move_remainder = Some((target, group, scale, next, remainder));
+                                next
+                            }
                             WindowChange::Resize { dw, dh } => {
                                 if !before.info.resizable {
                                     return Err("Window does not support resizing".into());
@@ -1546,6 +1573,9 @@ impl Session {
                         if cancelled() {
                             return Ok(());
                         }
+                        if next == base && !before.info.maximized && !before.info.minimized {
+                            return Ok(());
+                        }
                         access.set_frame(target, next, screens, cancelled)
                     }
                 };
@@ -1588,6 +1618,9 @@ impl Session {
                             screen.bounds,
                         ));
                     }
+                }
+                if change_result.is_err() {
+                    self.move_remainder = None;
                 }
                 change_result?;
                 self.target = Some(target);
@@ -2019,6 +2052,51 @@ mod tests {
         assert!(result.target.is_none());
         assert_eq!(result.closed, vec![WindowId(1)]);
         assert_eq!(result.windows.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn retired_tray_identity_cannot_restore_target_from_live_snapshot() {
+        let mut access = Fake::new(2);
+        let mut session = Session::default();
+        run(
+            &mut session,
+            &mut access,
+            WindowOperation::Acquire(Point::default()),
+        );
+        access.closed.push(WindowId(1));
+        let result = run(&mut session, &mut access, WindowOperation::Enumerate);
+        assert!(access.windows.contains_key(&WindowId(1)));
+        assert_eq!(result.closed, [WindowId(1)]);
+        assert!(result.target.is_none());
+        assert!(session.target.is_none());
+        assert!(result.windows.unwrap().iter().all(|w| w.id != WindowId(1)));
+    }
+
+    #[test]
+    fn continuous_move_preserves_cursor_and_skips_subpixel_native_writes() {
+        let mut access = Fake::new(1);
+        let mut session = Session::default();
+        run(
+            &mut session,
+            &mut access,
+            WindowOperation::Acquire(Point::default()),
+        );
+        let before = access.windows[&WindowId(1)].info.bounds;
+        let writes = access.writes.len();
+        for _ in 0..10 {
+            let result = run(
+                &mut session,
+                &mut access,
+                WindowOperation::Adjust {
+                    target: WindowId(1),
+                    change: WindowChange::Move { dx: 0.05, dy: 0.0 },
+                    group: 99,
+                },
+            );
+            assert!(result.pointer.is_none());
+        }
+        assert_eq!(access.windows[&WindowId(1)].info.bounds.x, before.x + 1.0);
+        assert_eq!(access.writes.len(), writes + 1);
     }
 
     #[test]

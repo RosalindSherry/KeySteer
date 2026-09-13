@@ -19,6 +19,7 @@ struct Checkpoint {
 
 pub(crate) struct Grouped<A> {
     pending_bars: BTreeSet<crate::api::window_tabs::TabGroupId>,
+    closing: std::cell::RefCell<BTreeSet<WindowId>>,
     interacting: BTreeSet<WindowId>,
     numbers_dirty: bool,
     scope: Option<crate::api::window::WindowScope>,
@@ -52,6 +53,7 @@ impl<A: WindowAccess> Grouped<A> {
     pub fn new(native: A) -> Self {
         Self {
             pending_bars: BTreeSet::new(),
+            closing: Default::default(),
             interacting: BTreeSet::new(),
             numbers_dirty: false,
             scope: None,
@@ -1087,6 +1089,8 @@ impl<A: WindowAccess> Grouped<A> {
         Ok(())
     }
     fn forget(&mut self, id: WindowId) {
+        self.closing.get_mut().remove(&id);
+        self.numbers_dirty = true;
         self.groups.forget(id);
         self.observed.remove(&id);
         self.hidden.remove(&id);
@@ -1178,6 +1182,21 @@ impl<A: WindowAccess> WindowAccess for Grouped<A> {
         // Run the same survivor-selection path before publishing the inventory.
         for id in self.native.take_closed() {
             self.close_member(id, screens, cancelled)?;
+        }
+        // A successful close request may hide a still-live native window in the
+        // tray. Only a completed inventory can confirm that it left the list;
+        // a cancelled scan or a still-visible save dialog must not retire it.
+        if !cancelled() {
+            let gone: Vec<_> = self
+                .closing
+                .get_mut()
+                .iter()
+                .copied()
+                .filter(|id| !windows.iter().any(|w| w.id == *id))
+                .collect();
+            for id in gone {
+                self.close_member(id, screens, cancelled)?;
+            }
         }
         let windows: Vec<_> = windows
             .into_iter()
@@ -1329,7 +1348,9 @@ impl<A: WindowAccess> WindowAccess for Grouped<A> {
             .state
             .containing(id)
             .map_or(id, |group| group.active);
-        self.native.close(active)
+        self.native.close(active)?;
+        self.closing.borrow_mut().insert(active);
+        Ok(())
     }
     fn pointer(&self) -> Result<Point, String> {
         self.native.pointer()

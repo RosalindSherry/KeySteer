@@ -3,6 +3,7 @@ use crate::api::window_tabs::TabGroupId;
 use std::cell::Cell;
 
 struct Fake {
+    excluded: BTreeSet<WindowId>,
     windows: BTreeMap<WindowId, Snapshot>,
     events: Vec<TabNativeEvent>,
     closed: Vec<WindowId>,
@@ -324,6 +325,7 @@ fn setup() -> Grouped<Fake> {
         })
         .collect();
     let mut grouped = Grouped::new(Fake {
+        excluded: BTreeSet::new(),
         windows,
         events: Vec::new(),
         closed: Vec::new(),
@@ -370,7 +372,12 @@ impl WindowAccess for Fake {
         Ok(Some(self.windows[&WindowId(1)].info.clone()))
     }
     fn enumerate(&mut self, _: &[Screen], _: &dyn Fn() -> bool) -> Result<Vec<WindowInfo>, String> {
-        Ok(self.windows.values().map(|s| s.info.clone()).collect())
+        Ok(self
+            .windows
+            .values()
+            .filter(|s| !self.excluded.contains(&s.info.id))
+            .map(|s| s.info.clone())
+            .collect())
     }
     fn snapshot(&self, id: WindowId, screens: &[Screen]) -> Result<Snapshot, String> {
         self.snapshot_reads.set(self.snapshot_reads.get() + 1);
@@ -1511,4 +1518,35 @@ fn native_gesture_defers_header_correction_until_end() {
         .push(TabNativeEvent::GeometryChanged(active));
     access.pump(&screens(), &|| false).unwrap();
     assert_eq!(access.native.writes, writes + 1);
+}
+
+#[test]
+fn close_to_tray_retires_only_after_completed_inventory_and_compacts_numbers() {
+    let mut access = setup();
+    access.enumerate(&screens(), &|| false).unwrap();
+    access.close(WindowId(2)).unwrap();
+    access.enumerate(&screens(), &|| false).unwrap();
+    assert!(
+        access.take_closed().is_empty(),
+        "save dialog can refuse close"
+    );
+    access.native.excluded.insert(WindowId(2));
+    access.enumerate(&screens(), &|| true).unwrap();
+    assert!(
+        access.take_closed().is_empty(),
+        "cancelled scans are not authoritative"
+    );
+    access.enumerate(&screens(), &|| false).unwrap();
+    assert_eq!(access.take_closed(), [WindowId(2)]);
+    assert_eq!(
+        access.groups.state.numbers,
+        [(WindowId(1), 1), (WindowId(3), 2), (WindowId(4), 3)]
+    );
+    assert!(
+        access.native.snapshot(WindowId(2), &screens()).is_ok(),
+        "tray handle remains alive"
+    );
+    access.native.excluded.clear();
+    access.enumerate(&screens(), &|| false).unwrap();
+    assert_eq!(access.groups.state.numbers.last(), Some(&(WindowId(2), 4)));
 }

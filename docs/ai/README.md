@@ -83,3 +83,9 @@ Tabs 几何/内容分离、原生手势跟随、音频独立 worker 与逐屏布
 
 
 Shift+V+M 系统静音默认绑定与合并提示见 [配置](03-configuration.md)。
+
+
+关闭/隐藏到托盘后的目标回收与窗口编号向前压紧见 [API](02-runtime-and-api.md)、[后端](06-platform-backends.md) 和 [验证](08-build-docs-and-tests.md)。
+
+
+Window 连续移动的指针稳定、亚像素累积和显示帧等待见 [性能](07-rendering-and-performance.md) 与 [验证](08-build-docs-and-tests.md)。

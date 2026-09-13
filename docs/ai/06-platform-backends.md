@@ -393,3 +393,6 @@ Tabs 跟随保留独立顶层窗口和独立标签栏，不重新嵌入外部应
 
 
 音频安全收敛：Windows Toolhelp 快照在 native 模块复用 OwnedHandle，失败与 unwind 均释放；只把 ERROR_NO_MORE_FILES 视为正常枚举结束。macOS 控制器用 `Option<NonNull>` 表示唯一所有权，创建失败返回错误，销毁先 take；不在模式或共享协调器传递裸指针。platform/common 使用 forbid(unsafe_code)。保留测试断言等明确不变量中的 unwrap，不做机械替换。音频完成统一经过 publish_result，失败调用 report_error! 写入 support/logging.rs，包含 session/request 上下文；取消反馈不记录为错误，成功路径不格式化日志。
+
+
+关闭回收：X 的原生关闭请求仍为异步。完整库存确认被请求关闭的窗口不再存在于候选列表时，也回收隐藏到托盘但句柄仍存活的逻辑窗口；取消扫描和仍可见的保存对话框不构成关闭确认。closed 结果优先于旧快照，移除目标边框与编号。关闭后窗口编号按原相对次序压紧为 1..N，恢复出现的窗口追加新编号；普通最小化/屏幕过滤仍保留号码，标签组编号不变。Rust 回归覆盖托盘句柄、取消库存、拒绝关闭和旧快照，网页模拟器同步编号压紧。
