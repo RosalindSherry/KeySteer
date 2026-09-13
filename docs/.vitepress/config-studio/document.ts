@@ -46,7 +46,7 @@ export function parseConfigDocument(source: string): ParsedConfigDocument {
     if (!isRecord(value)) return
     for (const [key, child] of Object.entries(value)) {
       if ((key === 'bindings' || key === 'hotkeys') && isRecord(child)) for (const action of Object.values(child).flat()) {
-        if (['window_maximize', 'window_cycle_state'].includes(String(action))) throw new Error(`${action} 已移除，请使用 size_cycle`)
+        if (String(action) === 'window_cycle_state') throw new Error(`${action} 已移除，请使用 window_maximize / window_minimize`)
         if (['window_layout', 'window_edit', 'window_saved_layouts', 'window_cancel', 'window_exit'].includes(String(action))) throw new Error(`${action} 已移除，请使用 window_quick / window_editor / window_restore 或普通模式绑定`)
       }
       checkBindings(child)

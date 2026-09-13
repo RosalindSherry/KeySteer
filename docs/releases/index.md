@@ -1,5 +1,11 @@
 # 更新日志 / Release Notes
 
+## 0.10.5
+
+- 拆分窗口最大化与最小化操作：`F` 切换最大化／还原，`Shift+F` 切换最小化／还原，不再经过三态循环。按键提示仍合并在一行。
+
+- Split window maximization and minimization into separate toggles: `F` maximizes/restores, while `Shift+F` minimizes/restores, replacing the three-state cycle. Both shortcuts remain on one help row.
+
 ## 0.10.4
 
 - 按键提示支持配置默认显示状态：`mouse_key_help` 控制鼠标操作模式，`window_key_help` 控制窗口模式；均可通过 `?` 随时显示或隐藏。

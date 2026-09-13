@@ -771,10 +771,24 @@ export function applyWindowAction(state: SimulatorState, action: string, setting
       if (panel !== 'none') startWindowEdit(state, panel === 'tree', settings, false)
       state.lastEvent = previous ? redo ? '已重做一步窗口调整' : '已撤销一步窗口调整' : redo ? '没有可重做的调整' : '没有可撤销的调整'; return true
     }
-    case 'window_center': case 'size_cycle': case 'window_screen_next': case 'window_screen_previous': {
+    case 'window_maximize': case 'window_minimize': case 'window_center': case 'size_cycle': case 'window_screen_next': case 'window_screen_previous': {
       if (!target) break
       const before = snapshot(w), old = { ...target }
-      if (action === 'size_cycle') {
+      if (action === 'window_maximize' || action === 'window_minimize') {
+        if (target.minimized || action === 'window_maximize' && target.restored) {
+          target.minimized = false; Object.assign(target, target.restored); target.restored = undefined
+        } else if (action === 'window_minimize') {
+          target.restored ??= { x: target.x, y: target.y, width: target.width, height: target.height }
+          target.minimized = true
+          for (const id of containingTab(w, target.id)?.members ?? []) {
+            const member = w.windows.find(window => window.id === id)
+            if (member) member.minimized = true
+          }
+        } else {
+          target.restored = { x: target.x, y: target.y, width: target.width, height: target.height }
+          Object.assign(target, { x: 0, y: 0, ...WINDOW_AREA })
+        }
+      } else if (action === 'size_cycle') {
         if (target.minimized) { target.minimized = false; Object.assign(target, target.restored); target.restored = undefined }
         else if (target.restored) {
           target.minimized = true

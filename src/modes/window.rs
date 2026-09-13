@@ -426,6 +426,8 @@ impl WindowKind {
                     | W::NextScreen
                     | W::PreviousScreen
                     | W::CycleState
+                    | W::ToggleMaximize
+                    | W::ToggleMinimize
                     | W::Center
                     | W::Close
                     | W::Select

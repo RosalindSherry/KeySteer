@@ -18,7 +18,7 @@ Entering Window activates and locks the window under the pointer. Moving the poi
 | `S` | Toggle movement and resizing around the centre |
 | `C` | Centre the window |
 | `D` | Move to the next display |
-| `F` | Cycle maximize → minimize → restore |
+| `F` / `Shift+F` | Maximize / restore; minimize / restore |
 | Number | Select a window by number |
 | `Tab / Shift+Tab` | Next / previous window; prefer members of the current tab group |
 | `X` | Request that the window close; the app may ask you to save |

@@ -239,12 +239,19 @@ impl WindowSession {
                     self.status = Some("Close requested".into());
                 }
             }
-            W::NextScreen | W::PreviousScreen | W::CycleState | W::Center => {
+            W::NextScreen
+            | W::PreviousScreen
+            | W::CycleState
+            | W::ToggleMaximize
+            | W::ToggleMinimize
+            | W::Center => {
                 self.group += 1;
                 let change = match action {
                     W::NextScreen => WindowChange::Screen(WindowScreenTarget::Next),
                     W::PreviousScreen => WindowChange::Screen(WindowScreenTarget::Previous),
                     W::CycleState => WindowChange::CycleState,
+                    W::ToggleMaximize => WindowChange::ToggleMaximize,
+                    W::ToggleMinimize => WindowChange::ToggleMinimize,
                     _ => WindowChange::Center,
                 };
                 self.adjust(change, out);

@@ -36,13 +36,13 @@ fn window_help_default_and_toggle_are_independent_of_normal_help() {
         enter_window(&mut engine, &mut backend, &log);
         assert_eq!(engine.window_help_visible(), visible);
         assert_eq!(log.lock().unwrap().scenes.last().unwrap().labels.iter()
-            .any(|label| label.text == "Maximize / minimize / restore"), visible);
+            .any(|label| label.text == "Maximize / minimize ↔ restore"), visible);
         for event in [key_down("?"), key_up("?")] {
             engine.handle_backend_event(event, &mut backend).unwrap();
         }
         assert_eq!(engine.window_help_visible(), !visible);
         assert_eq!(log.lock().unwrap().scenes.last().unwrap().labels.iter()
-            .any(|label| label.text == "Maximize / minimize / restore"), !visible);
+            .any(|label| label.text == "Maximize / minimize ↔ restore"), !visible);
         assert!(!engine.overlay.key_help_visible);
         for mode in [ModeId::window_quick(), ModeId::window_editor(), ModeId::window_restore(), ModeId::window_tab()] {
             engine.set_active(mode);
@@ -112,7 +112,7 @@ fn window_help_shows_restore_and_complete_descriptions_from_effective_bindings()
         {
             let recorded = log.lock().unwrap();
             let labels = &recorded.scenes.last().unwrap().labels;
-            for text in ["Restore", "Edit", "Maximize / minimize / restore", if rebound { "V" } else { "R" }] {
+            for text in ["Restore", "Edit", "Maximize / minimize ↔ restore", if rebound { "V" } else { "R" }] {
                 assert!(labels.iter().map(|label| label.text.as_str()).collect::<Vec<_>>().join(" ").contains(text), "missing {text}");
             }
             assert!(!labels.iter().any(|label| label.text == "Save layout"));
@@ -1292,8 +1292,8 @@ fn grouped_window_help_keeps_two_semantic_columns_and_header_exit_at_each_dpi() 
 
                 if entry.is_none() {
                     assert!(labels.iter().any(|(l, _)| l.text == "H/J/K/L"));
-                    assert!(labels.iter().any(|(l, _)| l.text == "Maximize / minimize / restore"));
-                    let key_rects: Vec<_> = ["H/J/K/L", "S", "C", "D", "F", "X"].iter().map(|key| labels.iter().find(|(l, _)| l.text == *key).unwrap().1).collect();
+                    assert!(labels.iter().any(|(l, _)| l.text == "Maximize / minimize ↔ restore"));
+                    let key_rects: Vec<_> = ["H/J/K/L", "S", "C", "D", "F / SHIFT+F", "X"].iter().map(|key| labels.iter().find(|(l, _)| l.text == *key).unwrap().1).collect();
                     assert!(key_rects.windows(2).all(|pair| (pair[0].right() - pair[1].right()).abs() < 1.0));
 
                     let keys: Vec<_> = ["A", "E", "R", "T"].into_iter().map(|key| labels.iter().find(|(l, _)| l.text == key).unwrap().1).collect();

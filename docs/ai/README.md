@@ -112,3 +112,6 @@ Window / AERT 鼠标下模式指示器与独立面板显示见 [性能与覆盖�
 
 
 全局按键提示的 mouse_key_help / window_key_help 默认显示与 ? 切换见 [配置](03-configuration.md)。
+
+
+F / Shift+F 独立状态切换与单行提示见 [配置](03-configuration.md) 和 [后端](06-platform-backends.md)。

@@ -225,7 +225,7 @@ Settings，不存在 `ConfigReloaded` 广播。
 它们不属于键盘 `send` 目标。点击复用普通点击的长按锁定与清理流程。默认配置只提供注释示例，不占用用户的前进/后退键。未绑定或 `none`
 时侧键保持透传。示例见 [配置参考](/reference/configuration#鼠标侧键)。
 
-普通 Window 默认 `f = "size_cycle"`：最大化→最小化→恢复原位置和尺寸→循环，不提供旧动作名称的兼容别名。
+普通 Window 默认 `f = "window_maximize"`、`shift+f = "window_minimize"`，分别切换最大化／还原、最小化／还原，提示合并一行。最小化后还原到保存的普通位置和尺寸。`size_cycle` 仅保留给既有自定义绑定，不再是默认动作。
 
 模式切换在公共输入层记录进入时已按住的物理键。涉及这些键的 temporary_mode_keys 必须等对应键松开后重新按下才生效，避免 Alt+W 等启动组合键在释放过程中误激活目标模式的临时 Normal；显式组合绑定仍使用完整物理按键状态，keep 不重新设门槛。
 

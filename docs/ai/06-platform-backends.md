@@ -418,3 +418,11 @@ macOS 应用音频在没有 Core Audio 进程时保存内存偏好并显示待�
 主线程标签发布复用相同的事件源；它在 AppKit 线程安装，并在 refresh 时排空。几何通知读取位置／尺寸与最小化／全屏状态，复用标题、应用名和 resizable 元数据；内容通知仍读取完整快照。CF 通知名称在 observer context 中缓存，不逐事件转换成 Rust String。AX callback 已在被唤醒的 worker 上运行，只入队事件，不再向自身重复发送 pipe 唤醒；UI 和跨线程请求仍发送持久唤醒信号。
 
 物理拖动期间标记正在交互的成员，避免 header 校正反向移动目标窗口；已有输入 hook 的左键松开直接唤醒窗口 worker，发出 MoveResizeEnded 并校正一次。每次几何更新根据当前矩形重新确定屏幕，不保存或假定刷新率；AppKit 负责各屏 backing scale。
+
+
+WindowAccess::toggle_state shares maximize/restore and minimize/restore decisions
+across Windows and macOS. Normal-to-minimized calls tab_minimize directly; it
+never maximizes first. A minimized target, or a maximized target under the
+maximize toggle, returns to its saved normal geometry. Grouped delegates to the
+active member and retains group minimization/header handling. Legacy cycle_state
+is retained for explicit size_cycle bindings. Modes send API requests only.

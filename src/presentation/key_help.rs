@@ -900,6 +900,8 @@ fn window_action_label(action: &str) -> Option<&'static str> {
         "window_screen_next" => "Next screen",
         "window_screen_previous" => "Previous screen",
         "size_cycle" => "Maximize / minimize / restore",
+        "window_maximize" => "Maximize / restore",
+        "window_minimize" => "Minimize / restore",
         "window_center" => "Center window",
         "window_audio_previous" => "Previous app output",
         "window_audio_next" => "Next app output",

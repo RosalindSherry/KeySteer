@@ -154,6 +154,26 @@ pub(crate) trait WindowAccess {
         screens: &[Screen],
         cancelled: &dyn Fn() -> bool,
     ) -> Result<WindowInfo, String>;
+    fn toggle_state(
+        &mut self,
+        id: WindowId,
+        minimize: bool,
+        screens: &[Screen],
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<WindowInfo, String> {
+        let before = self.snapshot(id, screens)?;
+        if cancelled() {
+            return Ok(before.info);
+        }
+        if before.info.minimized || (!minimize && before.info.maximized) {
+            self.set_frame(id, before.restored, screens, cancelled)
+        } else if minimize {
+            self.tab_minimize(id, screens, cancelled)?;
+            self.snapshot(id, screens).map(|s| s.info)
+        } else {
+            self.cycle_state(id, screens, cancelled)
+        }
+    }
     fn select(&self, id: WindowId) -> Result<(), String>;
     /// Reap native audio routes; true requests a bounded maintenance wakeup.
     fn maintain_audio(&self) -> bool {
@@ -1482,6 +1502,12 @@ impl Session {
                     matches!(change, WindowChange::Resize { .. }).then_some(base.center());
                 let change_result = match change {
                     WindowChange::CycleState => access.cycle_state(target, screens, cancelled),
+                    WindowChange::ToggleMaximize => {
+                        access.toggle_state(target, false, screens, cancelled)
+                    }
+                    WindowChange::ToggleMinimize => {
+                        access.toggle_state(target, true, screens, cancelled)
+                    }
                     change => {
                         let next = match change {
                             WindowChange::Move { dx, dy } => {
@@ -1568,7 +1594,9 @@ impl Session {
                                     &screens[dest],
                                 )
                             }
-                            WindowChange::CycleState => unreachable!(),
+                            WindowChange::CycleState
+                            | WindowChange::ToggleMaximize
+                            | WindowChange::ToggleMinimize => unreachable!(),
                         };
                         if cancelled() {
                             return Ok(());
@@ -1906,6 +1934,7 @@ mod tests {
                 let s = self.windows.get_mut(&id).ok_or("closed")?;
                 s.info.bounds = rect;
                 s.info.maximized = false;
+                s.info.minimized = false;
                 s.info.screen = geometry::screen_index(screens, rect).unwrap();
                 s.restored = rect;
                 self.writes.push(id);
@@ -1998,6 +2027,27 @@ mod tests {
             &screens(),
             &|| false,
         )
+    }
+
+    #[test]
+    fn maximize_and_minimize_toggle_directly_back_to_restored_geometry() {
+        for minimize in [false, true] {
+            let mut access = Fake::new(2);
+            let id = WindowId(1);
+            let before = access.snapshot(id, &screens()).unwrap();
+            for _ in 0..3 {
+                let changed = access
+                    .toggle_state(id, minimize, &screens(), &|| false)
+                    .unwrap();
+                assert_eq!(changed.minimized, minimize);
+                assert_eq!(changed.maximized, !minimize);
+                let restored = access
+                    .toggle_state(id, minimize, &screens(), &|| false)
+                    .unwrap();
+                assert!(!restored.minimized && !restored.maximized);
+                assert_eq!(restored.bounds, before.info.bounds);
+            }
+        }
     }
 
     #[test]

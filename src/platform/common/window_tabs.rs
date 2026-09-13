@@ -1337,6 +1337,25 @@ impl<A: WindowAccess> WindowAccess for Grouped<A> {
         self.publish(screens)?;
         Ok(result)
     }
+    fn toggle_state(
+        &mut self,
+        id: WindowId,
+        minimize: bool,
+        screens: &[Screen],
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<WindowInfo, String> {
+        let active = self.groups.state.containing(id).map_or(id, |g| g.active);
+        self.native
+            .toggle_state(active, minimize, screens, cancelled)?;
+        if self.groups.state.containing(id).is_some() {
+            self.minimize_group(active, screens, cancelled)?;
+            self.fit_header(active, screens, cancelled)?;
+        }
+        let result = self.snapshot(id, screens)?.info;
+        self.cache_observed(screens);
+        self.publish(screens)?;
+        Ok(result)
+    }
     fn select(&self, id: WindowId) -> Result<(), String> {
         self.native.select(id)
     }

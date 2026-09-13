@@ -250,6 +250,14 @@ pub(super) fn sections(
         "Previous page",
         "Next page",
     ] {
+        if name == "size_cycle" {
+            pair(
+                &mut actions,
+                ["window_maximize", "window_minimize"],
+                "Maximize / minimize ↔ restore",
+                &mut operations,
+            );
+        }
         take(&mut actions, name, &mut operations);
     }
     let mut modes = Vec::new();

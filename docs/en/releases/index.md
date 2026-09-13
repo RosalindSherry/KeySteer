@@ -1,5 +1,9 @@
 # Release notes
 
+## 0.10.5
+
+- Split window maximization and minimization into separate toggles: `F` maximizes/restores, while `Shift+F` minimizes/restores, replacing the three-state cycle. Both shortcuts remain on one help row.
+
 ## 0.10.4
 
 - Configure the initial key-help visibility with `mouse_key_help` for pointer modes and `window_key_help` for window modes. Press `?` to show or hide either panel regardless of its default. 

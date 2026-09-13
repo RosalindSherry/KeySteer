@@ -58,6 +58,7 @@ export function windowHelpSections(entries: HelpEntry[], mode: string, resizing 
   family(['window_ratio_up', 'window_ratio_down'], 'Height − / +', operations)
   family(['window_tab_move_left', 'window_tab_move_right'], 'Move tab ← / →', operations)
   pair(['window_tab_next', 'window_tab_previous'], 'Next / previous tab', operations)
+  pair(['window_maximize', 'window_minimize'], 'Maximize / minimize ↔ restore', operations)
   for (const name of ['window_size', 'window_center', 'window_screen_next', 'window_screen_previous', 'size_cycle', 'window_close', 'window_remove_region', 'window_save_layout',
     'Area number', 'window_area_number', 'window_tab_end', 'window_tab_group', 'window_number_end', 'window_tab_remove', 'window_tab_dissolve', 'window_delete', 'window_confirm', 'Previous page', 'Next page']) take(name, operations)
   const modes: HelpEntry[] = [], common: HelpEntry[] = []
@@ -98,5 +99,5 @@ export function windowHelpActionSupported(mode: string, action: string): boolean
   const common = ['window_audio_previous', 'window_audio_next', 'window_system_volume_down', 'window_system_volume_up', 'window_system_volume_mute', 'window_system_audio_previous', 'window_system_audio_next', 'window_volume_down', 'window_volume_up', 'window_volume_mute', 'window_select', 'window_select_previous', 'window_undo', 'window_redo', 'window_reset_initial']
   if (mode === 'window_quick') return action.startsWith('window_layout_') || common.includes(action)
   if (mode === 'window_editor') return /^window_(layout_|split_|ratio_)/.test(action) || common.includes(action) || ['window_save_layout', 'window_remove_region'].includes(action)
-  return common.includes(action) || ['window_tile', 'window_left', 'window_down', 'window_up', 'window_right', 'window_size', 'window_screen_next', 'window_screen_previous', 'size_cycle', 'window_center', 'window_close'].includes(action)
+  return common.includes(action) || ['window_tile', 'window_left', 'window_down', 'window_up', 'window_right', 'window_size', 'window_screen_next', 'window_screen_previous', 'size_cycle', 'window_maximize', 'window_minimize', 'window_center', 'window_close'].includes(action)
 }

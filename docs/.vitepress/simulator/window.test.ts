@@ -362,7 +362,7 @@ test('state cycle preserves target, restores original geometry and rejects old n
   enterWindow(state)
   const target = windowTarget(state.window)!
   const original = { x: target.x, y: target.y, width: target.width, height: target.height }
-  for (const old of ['window_maximize', 'window_cycle_state']) assert.equal(applyWindowAction(state, old), false)
+  assert.equal(applyWindowAction(state, 'window_cycle_state'), false)
   for (let i = 0; i < 2; i++) {
     applyWindowAction(state, 'size_cycle')
     assert.equal(target.width, WINDOW_AREA.width)
@@ -378,6 +378,24 @@ test('state cycle preserves target, restores original geometry and rejects old n
   applyWindowAction(state, 'window_undo')
   assert.equal(!!windowTarget(state.window)?.minimized, false)
   assert.equal(windowTarget(state.window)?.width, WINDOW_AREA.width)
+})
+
+test('maximize and minimize each toggle directly to restored geometry', () => {
+  for (const action of ['window_maximize', 'window_minimize']) {
+    const state = createSimulatorState()
+    enterWindow(state)
+    const target = windowTarget(state.window)!
+    const original = { x: target.x, y: target.y, width: target.width, height: target.height }
+    for (let i = 0; i < 3; i++) {
+      applyWindowAction(state, action)
+      assert.equal(!!target.minimized, action === 'window_minimize')
+      if (action === 'window_maximize') assert.equal(target.width, WINDOW_AREA.width)
+      else assert.equal(target.width, original.width)
+      applyWindowAction(state, action)
+      assert.equal(target.minimized, false)
+      assert.deepEqual({ x: target.x, y: target.y, width: target.width, height: target.height }, original)
+    }
+  }
 })
 
 

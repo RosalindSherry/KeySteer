@@ -2003,6 +2003,30 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "toggles only disposable test-owned windows"]
+    fn native_separate_maximize_and_minimize_toggles() {
+        let _ = super::super::screens::enable_dpi_awareness();
+        let screens = super::super::screens::list_screens().unwrap();
+        let screen = screens.iter().find(|s| s.is_primary).unwrap();
+        let probe = Probe::observable(screen.work_area.inset(160.0, 140.0));
+        let mut native = Windows::default();
+        let id = native.retain(probe.hwnd, &screens).unwrap().id;
+        let before = native.snapshot(id, &screens).unwrap();
+        for minimize in [false, true, false, true] {
+            let changed = native
+                .toggle_state(id, minimize, &screens, &|| false)
+                .unwrap();
+            assert_eq!(changed.minimized, minimize);
+            assert_eq!(changed.maximized, !minimize);
+            let restored = native
+                .toggle_state(id, minimize, &screens, &|| false)
+                .unwrap();
+            assert!(!restored.minimized && !restored.maximized);
+            assert_eq!(restored.bounds, before.info.bounds);
+        }
+    }
+
+    #[test]
     #[ignore = "reserves a tab header on a disposable maximized window"]
     fn native_maximized_tab_header_keeps_state_and_restore() {
         let _ = super::super::screens::enable_dpi_awareness();

@@ -72,6 +72,8 @@ pub enum WindowAction {
     NextScreen,
     PreviousScreen,
     CycleState,
+    ToggleMaximize,
+    ToggleMinimize,
     Center,
     Close,
     VolumeDown,
@@ -143,6 +145,8 @@ impl WindowAction {
             Self::NextScreen => "window_screen_next",
             Self::PreviousScreen => "window_screen_previous",
             Self::CycleState => "size_cycle",
+            Self::ToggleMaximize => "window_maximize",
+            Self::ToggleMinimize => "window_minimize",
             Self::Center => "window_center",
             Self::Close => "window_close",
             Self::VolumeDown => "window_volume_down",
@@ -199,6 +203,8 @@ impl WindowAction {
             Self::NextScreen,
             Self::PreviousScreen,
             Self::CycleState,
+            Self::ToggleMaximize,
+            Self::ToggleMinimize,
             Self::Center,
             Self::Close,
             Self::VolumeDown,
@@ -243,6 +249,8 @@ pub enum WindowChange {
     Center,
     CycleState,
     Screen(WindowScreenTarget),
+    ToggleMaximize,
+    ToggleMinimize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -389,12 +397,19 @@ pub enum WindowEditResult {
 mod state_cycle_tests {
     use super::WindowAction;
     #[test]
-    fn size_cycle_is_the_only_supported_state_cycle_name() {
+    fn separate_state_toggles_and_legacy_cycle_parse() {
         assert_eq!(
             WindowAction::parse("size_cycle"),
             Some(WindowAction::CycleState)
         );
-        assert_eq!(WindowAction::parse("window_maximize"), None);
+        assert_eq!(
+            WindowAction::parse("window_maximize"),
+            Some(WindowAction::ToggleMaximize)
+        );
+        assert_eq!(
+            WindowAction::parse("window_minimize"),
+            Some(WindowAction::ToggleMinimize)
+        );
         assert_eq!(WindowAction::parse("window_cycle_state"), None);
         assert_eq!(WindowAction::CycleState.name(), "size_cycle");
     }
