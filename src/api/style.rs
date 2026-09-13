@@ -580,7 +580,7 @@ mod tests {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct KeyHelp {
-    pub enabled: bool,
+    pub mouse_key_help: bool,
     pub window_key_help: bool,
     pub font_family: String,
     pub font_size: f64,
@@ -596,7 +596,7 @@ pub struct KeyHelp {
 impl Default for KeyHelp {
     fn default() -> Self {
         Self {
-            enabled: true,
+            mouse_key_help: false,
             window_key_help: true,
             font_family: String::new(),
             font_size: 12.0,

@@ -57,6 +57,7 @@ impl Default for Normal {
 /// bindings so external shortcuts remain usable.
 fn default_normal_bindings() -> Bindings {
     let entries: &[(&str, &str)] = &[
+        ("?", "key_help"),
         // Movement and speed modifiers, held alongside a direction.
         ("h", "move_left"),
         ("j", "move_down"),

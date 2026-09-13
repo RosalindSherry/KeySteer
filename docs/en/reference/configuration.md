@@ -246,7 +246,7 @@ macOS supports Accessibility Tree, Vision, and Hybrid. Windows defaults to `hybr
 
 New to window control? Start with the [Window guide](/en/modes/window) for practical recipes and default keys.
 
-Use the five top-level sections `[window]`, `[window_quick]`, `[window_editor]`, `[window_restore]` and `[window_tab]`. Each supports its own `enabled`, `bindings`, `inherits`, `app_configs`, `temporary_mode`, `temporary_mode_keys`, `number_timeout_ms`, `border_width`, `ui` and `lifecycle`. Defaults inherit hotkeys and temporarily use Normal while Primary is held.
+Use the five top-level sections `[window]`, `[window_quick]`, `[window_editor]`, `[window_restore]` and `[window_tab]`. Each supports its own `bindings`, `inherits`, `app_configs`, `temporary_mode`, `temporary_mode_keys`, `number_timeout_ms`, `border_width`, `ui` and `lifecycle`. Defaults inherit hotkeys and temporarily use Normal while Primary is held.
 
 | Parameter | Section | Default |
 | --- | --- | --- |
@@ -389,18 +389,21 @@ Enable debug logs only while investigating an issue; they are written to `keyste
 
 ## Key help
 
-The `key_help` verb toggles the available-key panel. Add `"?" = "key_help"` under `[normal.bindings]` to enable it. Omission or commenting out the entry disables it; no `none` entry is needed. `?` matches the character produced by the operating system; configuration parsing does not infer a layout or expand it into a chord. Inherited bindings apply in targeting modes. Idle closes the panel.
+The `key_help` verb toggles the available-key panel. Normal binds `"?" = "key_help"` by default, and targeting modes inherit it. Existing custom binding tables must add this binding explicitly. `?` matches the character produced by the operating system. Idle closes the panel.
 
-`[key_help]` supports `enabled`, `font_family`, `font_size`, `background_color`, `text_color`, `border_color`, `border_width`, `border_radius`, `padding_x`, and `padding_y`. Empty font and omitted background/text colors follow the mode indicator and theme. Colors accept `#RRGGBBAA` or `{ light = "#RRGGBBAA", dark = "#RRGGBBAA" }`. Title sizing, columns and centering adapt automatically.
+`mouse_key_help` controls initial visibility in Normal, Grid, Recursive Grid, and UI Hint (default `false`). Set it to `true` to show the panel on entry. `?` always toggles it regardless of the default. Manual visibility persists between these modes; returning from Idle restores the default. The former `[key_help].enabled` setting is now named `mouse_key_help`.
+
+`[key_help]` supports `font_family`, `font_size`, `background_color`, `text_color`, `border_color`, `border_width`, `border_radius`, `padding_x`, and `padding_y`. Empty font and omitted background/text colors follow the mode indicator and theme. Colors accept `#RRGGBBAA` or `{ light = "#RRGGBBAA", dark = "#RRGGBBAA" }`. Title sizing, columns and centering adapt automatically.
 
 Window and its A/E/R/T submodes show the lower help panel by default. To start with it hidden:
 
 ```toml
 [key_help]
+mouse_key_help = false
 window_key_help = false
 ```
 
-These modes bind `"?" = "key_help"` by default, so `?` can still show or hide the panel. The manual choice persists between window submodes; leaving and reentering restores the configured default. Window borders and numbers remain visible. This setting is independent of ordinary help's `enabled` switch. Existing custom window binding tables must add `"?" = "key_help"` explicitly.
+These modes bind `"?" = "key_help"` by default, so `?` can still show or hide the panel. The manual choice persists between window submodes; leaving and reentering restores the configured default. Window borders and numbers remain visible. This setting is independent of `mouse_key_help`. Existing custom window binding tables must add `"?" = "key_help"` explicitly.
 
 Use **Edit key help style** in the [simulator](/en/simulator) to preview changes and export TOML.
 

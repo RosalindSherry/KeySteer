@@ -307,7 +307,7 @@ macOS 支持 Accessibility tree、Vision 和 Hybrid。Windows 默认使用 `hybr
 
 第一次使用？先看 [Window 操作指南](/modes/window)，按场景练习并查阅默认键位。
 
-五个顶层配置段分别为 `[window]`、`[window_quick]`、`[window_editor]`、`[window_restore]`、`[window_tab]`。它们都支持 `enabled`、`bindings`、`inherits`、`app_configs`、`temporary_mode`、`temporary_mode_keys`、`number_timeout_ms`、`border_width`、`ui` 和 `lifecycle`。默认仅继承 hotkeys，按住 Primary 临时使用 Normal。
+五个顶层配置段分别为 `[window]`、`[window_quick]`、`[window_editor]`、`[window_restore]`、`[window_tab]`。它们都支持 `bindings`、`inherits`、`app_configs`、`temporary_mode`、`temporary_mode_keys`、`number_timeout_ms`、`border_width`、`ui` 和 `lifecycle`。默认仅继承 hotkeys，按住 Primary 临时使用 Normal。
 
 | 参数 | 所属配置 | 默认值 |
 | --- | --- | --- |
@@ -450,18 +450,21 @@ timers = true
 
 ## 实时按键提示
 
-`key_help` 动词切换按键提示面板。在 `[normal.bindings]` 中写入 `"?" = "key_help"` 即可启用；省略或注释该项即禁用，不需要 `none`。`?` 按字面匹配操作系统产生的问号字符，解析器不推测键盘布局或按法；targeting 模式按原有规则继承。进入 Idle 自动关闭。
+`key_help` 动词切换按键提示面板，Normal 默认绑定 `"?" = "key_help"`，targeting 模式按继承规则使用。`?` 按字面匹配操作系统产生的问号字符。进入 Idle 自动关闭。已有自定义绑定表需自行补入此绑定。
+
+`mouse_key_help` 表示 Normal、Grid、Recursive Grid、UI Hint 的默认显示状态，默认 `false`；设为 `true` 则进入时显示。无论默认值如何，都能按 `?` 切换。手动选择在这些模式间保持，退出到 Idle 后重新进入恢复默认值。旧 `[key_help].enabled` 已改名为 `mouse_key_help`。
 
 Window 和 A/E/R/T 子模式的下方面板默认开启，可独立设置初始显示状态：
 
 ```toml
 [key_help]
+mouse_key_help = false
 window_key_help = false
 ```
 
-这些模式默认绑定 `"?" = "key_help"`，默认关闭后仍可按 `?` 显示或隐藏。手动切换状态在窗口子模式之间保持，退出后重新进入恢复配置默认值。此设置不隐藏窗口边框或编号，也不受普通提示开关 `enabled` 限制。已有自定义窗口绑定表需自行补入 `"?" = "key_help"`。
+这些模式默认绑定 `"?" = "key_help"`，默认关闭后仍可按 `?` 显示或隐藏。手动切换状态在窗口子模式之间保持，退出后重新进入恢复配置默认值。此设置不隐藏窗口边框或编号，与 `mouse_key_help` 独立。已有自定义窗口绑定表需自行补入 `"?" = "key_help"`。
 
-`[key_help]` 还支持 `enabled`、`font_family`、`font_size`、`background_color`、`text_color`、`border_color`、`border_width`、`border_radius`、`padding_x`、`padding_y`。空字体和未指定的背景/文字色跟随模式指示器与主题。颜色支持 `#RRGGBBAA` 或 `{ light = "#RRGGBBAA", dark = "#RRGGBBAA" }`。标题大小、分列和居中自动适配。
+`[key_help]` 还支持 `font_family`、`font_size`、`background_color`、`text_color`、`border_color`、`border_width`、`border_radius`、`padding_x`、`padding_y`。空字体和未指定的背景/文字色跟随模式指示器与主题。颜色支持 `#RRGGBBAA` 或 `{ light = "#RRGGBBAA", dark = "#RRGGBBAA" }`。标题大小、分列和居中自动适配。
 
 在[模拟器](/simulator)点击“编辑按键提示样式”，即可修改、预览并导出 TOML。
 

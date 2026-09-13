@@ -547,6 +547,31 @@ fn one_command_batch_submits_only_its_final_overlay_state() {
 
 
 #[test]
+fn mouse_help_defaults_are_toggleable_and_restored_on_reentry() {
+    for visible in [false, true] {
+        let mut config = Config::default();
+        config.key_help.mouse_key_help = visible;
+        let config = Config::parse(&config.to_toml().unwrap()).unwrap();
+        assert_eq!(config.key_help.mouse_key_help, visible);
+        let (mut engine, mut backend, _) = window_test_engine(&config);
+        engine.activate(ModeId::normal(), Some(ModeId::idle()), &mut backend).unwrap();
+        assert_eq!(engine.overlay.key_help_visible, visible);
+        for event in [character_down("/", '?'), key_up("/")] {
+            engine.handle_backend_event(event, &mut backend).unwrap();
+        }
+        assert_eq!(engine.overlay.key_help_visible, !visible);
+        for mode in [ModeId::grid(), ModeId::recursive_grid(), ModeId::ui_hint()] {
+            engine.set_active(mode);
+            assert_eq!(engine.overlay.key_help_visible, !visible);
+        }
+        engine.set_active(ModeId::idle());
+        assert!(!engine.overlay.key_help_visible);
+        engine.set_active(ModeId::normal());
+        assert_eq!(engine.overlay.key_help_visible, visible);
+    }
+}
+
+#[test]
 fn key_help_toggle_pairs_release_and_ignores_repeat() {
     let (mut engine, mut backend, log) = visible_normal_overlay();
     engine.handle_backend_event(key_down("left_shift"), &mut backend).unwrap();
@@ -630,11 +655,11 @@ padding_y = 10
     }
     assert!(!engine.overlay.key_help_visible);
     assert!(engine.overlay.key_help_cache.is_none());
-    engine.settings.key_help.enabled = false;
+    engine.settings.key_help.mouse_key_help = false;
     for event in tap_chord("f1") {
         engine.handle_backend_event(event, &mut backend).unwrap();
     }
-    assert!(!engine.overlay.key_help_visible);
+    assert!(engine.overlay.key_help_visible, "default-hidden must still allow manual toggling");
 }
 
 #[test]
@@ -646,14 +671,16 @@ fn key_help_rejects_invalid_styles_and_round_trips_verb() {
 }
 
 #[test]
-fn key_help_is_opt_in_even_when_the_entire_binding_table_is_omitted() {
-    for source in ["", "[normal]\n", "[normal.bindings]\n# \"?\" = \"key_help\""] {
+fn key_help_binding_defaults_can_be_replaced_by_an_explicit_table() {
+    for source in ["", "[normal]\n"] {
         let config = Config::parse(source).unwrap();
-        assert!(!config.normal.bindings.values().any(|binding| *binding == Binding::KeyHelp));
+        assert_eq!(config.normal.bindings.get("?"), Some(&Binding::KeyHelp));
     }
+    let config = Config::parse("[normal.bindings]\n# explicit empty table").unwrap();
+    assert!(!config.normal.bindings.values().any(|binding| *binding == Binding::KeyHelp));
     let config = Config::parse("[normal.bindings]\n\"?\" = \"key_help\"").unwrap();
     assert_eq!(config.normal.bindings.get("?"), Some(&Binding::KeyHelp));
-    assert!(!Config::default().normal.bindings.values().any(|binding| *binding == Binding::KeyHelp));
+    assert_eq!(Config::default().normal.bindings.get("?"), Some(&Binding::KeyHelp));
 }
 
 #[test]

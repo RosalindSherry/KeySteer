@@ -277,6 +277,16 @@ export default defineComponent({
       }
     })
 
+    watch(() => effectiveDocument.value?.key_help?.mouse_key_help, value => {
+      if (simulator.mode !== 'idle') simulator.keyHelpVisible = value === true
+    }, { immediate: true })
+    watch(() => simulator.mode, (mode, previous) => {
+      if (mode === 'idle') simulator.keyHelpVisible = false
+      else if (!isWindowMode(mode) && (previous === 'idle' || isWindowMode(previous))) {
+        simulator.keyHelpVisible = effectiveDocument.value?.key_help?.mouse_key_help === true
+      }
+    })
+
     const selectedAction = computed(() => {
       if (!effectiveDocument.value || !selectedChord.value) return ''
       const value = resolveBinding(effectiveDocument.value, activeMode.value, selectedChord.value)?.value
@@ -429,12 +439,12 @@ export default defineComponent({
         catch (error) { layoutStorageError.value = formatError(error); simulator.lastEvent = layoutStorageError.value; return }
       }
       if (applyWindowAction(simulator, action, effectiveDocument.value?.[isWindowMode(action) ? action : simulator.mode] ?? {}, Date.now(), continuous ? .016 : undefined)) { persistLayoutLibrary(); return }
-      if (applyKeyHelpAction(simulator, action, effectiveDocument.value?.key_help?.enabled !== false, effectiveDocument.value?.key_help?.window_key_help !== false)) return
+      if (applyKeyHelpAction(simulator, action, effectiveDocument.value?.key_help?.mouse_key_help !== false, effectiveDocument.value?.key_help?.window_key_help !== false)) return
       if (MOVEMENT_ACTIONS.has(action)) {
         movePointer(simulator, action, continuous ? 0.45 : 2.5)
         return
       }
-      if (applyModeAction(simulator, action)) return
+      if (applyModeAction(simulator, action, effectiveDocument.value?.key_help?.mouse_key_help === true)) return
       if (action === 'left_click' || action === 'double_click') {
         clickPulse.value += 1
         simulator.lastEvent = action === 'double_click' ? '双击' : '左键点击'
@@ -622,7 +632,7 @@ export default defineComponent({
     function setPreviewMode(mode: 'normal' | 'grid' | 'recursive_grid' | 'ui_hint' | 'window' | 'window_quick' | 'window_editor' | 'window_restore' | 'window_tab'): void {
       heldActions.clear(); physicalKeys.clear()
       if (isWindowMode(mode)) switchWindowMode(simulator, mode, effectiveDocument.value?.[mode] ?? {})
-      else applyModeAction(simulator, mode)
+      else applyModeAction(simulator, mode, effectiveDocument.value?.key_help?.mouse_key_help === true)
       simulator.lastEvent = `预览 ${mode}`
     }
 
@@ -807,7 +817,7 @@ export default defineComponent({
                     status={windowInputStatus(simulator.window) || ((simulator.lastEvent.startsWith('window_') || simulator.lastEvent === 'size_cycle') ? '' : simulator.lastEvent)}
                     windowState={simulator.window} />
                 )}
-                {effectiveDocument.value && simulator.keyHelpVisible && simulator.mode !== 'idle' && (!isWindowMode(simulator.mode) || simulator.window.temporary) && effectiveDocument.value.key_help?.enabled !== false && (
+                {effectiveDocument.value && simulator.keyHelpVisible && simulator.mode !== 'idle' && (!isWindowMode(simulator.mode) || simulator.window.temporary) && (
                   <KeyHelpPreview isMac={isMac.value} document={effectiveDocument.value} mode={isWindowMode(simulator.mode) ? temporaryMode.value : simulator.mode} appearance={appearance.value} />
                 )}
                 {!isWindowMode(simulator.mode) && <div class="ks-event-log">{simulator.lastEvent}</div>}

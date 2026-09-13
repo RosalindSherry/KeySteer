@@ -109,3 +109,6 @@ macOS Tabs 无定时器的 AX／鼠标松开跟随、worker 与 AppKit 的 CFRun
 
 
 Window / AERT 鼠标下模式指示器与独立面板显示见 [性能与覆盖层](07-rendering-and-performance.md)。
+
+
+全局按键提示的 mouse_key_help / window_key_help 默认显示与 ? 切换见 [配置](03-configuration.md)。

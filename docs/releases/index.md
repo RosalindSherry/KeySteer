@@ -1,5 +1,11 @@
 # 更新日志 / Release Notes
 
+## 0.10.4
+
+- 按键提示支持配置默认显示状态：`mouse_key_help` 控制鼠标操作模式，`window_key_help` 控制窗口模式；均可通过 `?` 随时显示或隐藏。
+
+- Configure the initial key-help visibility with `mouse_key_help` for pointer modes and `window_key_help` for window modes. Press `?` to show or hide either panel regardless of its default. 
+
 ## 0.10.3
 
 修复 macOS 上的窗口布局、最大化和按键提示问题。

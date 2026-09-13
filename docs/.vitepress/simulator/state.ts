@@ -36,11 +36,11 @@ export const MOVEMENT_ACTIONS = new Set([
   'move_right',
 ])
 
-export function createSimulatorState(): SimulatorState {
+export function createSimulatorState(mouseKeyHelp = false): SimulatorState {
   return {
     window: createWindowState(),
     mode: 'normal',
-    keyHelpVisible: false,
+    keyHelpVisible: mouseKeyHelp,
     windowHelpOverride: null,
     pointer: { x: 50, y: 50 },
     pressedButtons: new Set(),
@@ -62,9 +62,10 @@ export function movePointer(state: SimulatorState, action: string, distance: num
   state.lastEvent = action
 }
 
-export function applyModeAction(state: SimulatorState, action: string): boolean {
+export function applyModeAction(state: SimulatorState, action: string, mouseKeyHelp = false): boolean {
   if (!isSimulatorMode(action)) return false
   if (action === 'idle') state.keyHelpVisible = false
+  else if (state.mode === 'idle' || isWindowMode(state.mode)) state.keyHelpVisible = mouseKeyHelp
   if (state.mode.startsWith('window')) leaveWindow(state)
   state.mode = action
   state.lastEvent = `进入 ${action}`
@@ -93,13 +94,13 @@ function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value))
 }
 
-export function applyKeyHelpAction(state: SimulatorState, action: string, enabled = true, windowDefaultVisible = true): boolean {
+export function applyKeyHelpAction(state: SimulatorState, action: string, _mouseDefaultVisible = false, windowDefaultVisible = true): boolean {
   if (action !== 'key_help') return false
   if (state.mode !== 'idle') {
     if (isWindowMode(state.mode) && !state.window.temporary) {
       state.windowHelpOverride = !(state.windowHelpOverride ?? windowDefaultVisible)
     } else {
-      state.keyHelpVisible = enabled && !state.keyHelpVisible
+      state.keyHelpVisible = !state.keyHelpVisible
     }
   }
   state.lastEvent = action

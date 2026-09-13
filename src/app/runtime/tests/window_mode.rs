@@ -23,7 +23,7 @@ fn window_cursor_indicators_are_compact_and_independent_of_help_panel() {
 fn window_help_default_and_toggle_are_independent_of_normal_help() {
     for visible in [false, true] {
         let mut config = Config::default();
-        config.key_help.enabled = false;
+        config.key_help.mouse_key_help = false;
         config.key_help.window_key_help = visible;
         let exported = config.to_toml().unwrap();
         let config = Config::parse(&exported).unwrap();

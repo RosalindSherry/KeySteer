@@ -1794,8 +1794,7 @@ impl Engine {
                     if self.display_mode().is_window() {
                         self.overlay.window_help_override = Some(!self.window_help_visible());
                     } else {
-                        self.overlay.key_help_visible =
-                            self.settings.key_help.enabled && !self.overlay.key_help_visible;
+                        self.overlay.key_help_visible = !self.overlay.key_help_visible;
                     }
                     self.overlay.key_help_cache = None;
                     self.refresh_overlay(backend)?;

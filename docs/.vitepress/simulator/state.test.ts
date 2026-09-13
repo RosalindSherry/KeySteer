@@ -65,10 +65,25 @@ test('key_help toggles without resetting selection and closes on idle', () => {
   applyKeyHelpAction(state, 'key_help')
   assert.equal(state.keyHelpVisible, false)
   applyKeyHelpAction(state, 'key_help', false)
-  assert.equal(state.keyHelpVisible, false)
+  assert.equal(state.keyHelpVisible, true)
   applyKeyHelpAction(state, 'key_help')
   applyModeAction(state, 'idle')
   assert.equal(state.keyHelpVisible, false)
   applyKeyHelpAction(state, 'key_help')
   assert.equal(state.keyHelpVisible, false)
+})
+
+test('mouse help honors defaults on entry but always permits manual toggling', () => {
+  for (const visible of [false, true]) {
+    const state = createSimulatorState(visible)
+    assert.equal(state.keyHelpVisible, visible)
+    applyKeyHelpAction(state, 'key_help', visible)
+    assert.equal(state.keyHelpVisible, !visible)
+    applyModeAction(state, 'grid', visible)
+    assert.equal(state.keyHelpVisible, !visible)
+    applyModeAction(state, 'idle', visible)
+    assert.equal(state.keyHelpVisible, false)
+    applyModeAction(state, 'normal', visible)
+    assert.equal(state.keyHelpVisible, visible)
+  }
 })

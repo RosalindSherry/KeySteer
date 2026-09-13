@@ -92,7 +92,7 @@ Mode 的 cursor override 可单独覆盖这些值。普通反馈由物理按键�
 自动发现到的文件无效时，启动会记录错误并使用内置默认值；显式 `--config` 无效则返回
 错误。CLI `--check`、`--dump-config`、`--doctor` 用于诊断。
 
-工作模式通过普通 verb `key_help` 切换实时按键提示，需在 `normal.bindings` 中显式写入 `"?" = "key_help"`；内置绑定不添加此动作，缺少配置或注释掉该项即禁用，不需要 none。符号按原文解析；平台输入同时保留物理键和 OS 产生的字符，字符绑定直接匹配后者，不在解析器展开组合键；遵循现有继承、覆盖、按键边沿及 repeat 规则，没有保留快捷键。`[key_help]` 只配置 enabled、字体、字号、三种颜色、边框及内边距；标题与布局自动适配。该结构位于 `api::style`，经 configuration 编译进 EngineSettings。Idle、禁用及排除应用不显示面板。
+Key-help bindings default to ? in Normal and all Window submodes; targeting modes inherit Normal. Explicit binding tables replace defaults. mouse_key_help (default false) and window_key_help (default true) determine initial visibility, never prohibit toggling. Idle hides panels, fresh entry restores defaults, and submode changes preserve manual choices. The old enabled field is renamed mouse_key_help. Configuration export and the simulator share these semantics.
 
 字符观察需求与单字符索引在路由编译时产生，通过 Backend 的可选能力同步；原生物理键路径
 已能表示的按键不要求开启额外字符观察。候选过滤属于原生布局实现，不改写配置中的符号或
@@ -251,7 +251,7 @@ Window/Quick/Editor 默认 Shift+V+M=`window_system_volume_mute`，切换系统�
 
 
 Window-family help uses key_help.window_key_help (default true), independently
-of ordinary key_help.enabled. All five default binding tables include ? = key_help.
+of key_help.mouse_key_help (default false). All five default binding tables include ? = key_help.
 Engine stores an optional window-only visibility override, preserving it across
 submodes and resetting it on fresh entry. The panel toggle does not hide window
 borders/numbers. Explicit binding tables still replace defaults. Serde export and

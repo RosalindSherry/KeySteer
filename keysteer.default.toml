@@ -188,6 +188,7 @@ auto_release_ms = 0
 # ---------------------------------------------------------------------------
 
 [normal.bindings]
+"?" = "key_help"
 # Optional synthetic side clicks (the receiving app decides their behavior):
 # t = "mouse_x1"
 # y = "mouse_x2"
@@ -195,8 +196,7 @@ auto_release_ms = 0
 # mouse_x1 = "key_help"
 # mouse_x2 = "grid"
 # "ctrl+mouse_x2" = "ui_hint"
-# 实时按键提示：取消注释启用；省略或注释即禁用，可自行换键。
-# "?" = "key_help"
+# 实时按键提示默认绑定 ?，可自行换键。
 # Movement, vim style.
 h = "move_left"
 j = "move_down"
@@ -810,14 +810,14 @@ preserve = true
 # timers = true
 
 # ── 实时按键提示面板 ──────────────────────────────────────────────────────────
-# 在普通绑定表中写入 "?" = "key_help" 切换显示；省略或注释即禁用。
-# enabled=false 全局禁止显示。字号用于按键与说明，标题与布局自动适配。
+# 默认绑定 "?" = "key_help"；两个开关仅决定初始显示，? 始终可切换。
+# mouse_key_help 控制鼠标模式默认显示；字号用于按键与说明，标题与布局自动适配。
 # 空字体及未指定的背景/文字色继承模式指示器与主题；尺寸为逻辑像素。
 # 颜色支持 "#RRGGBBAA" 或 { light = "#RRGGBBAA", dark = "#RRGGBBAA" }。
 [key_help]
 # Window / A / E / R / T 初始面板显示；false 时仍可按 ? 切换。
 window_key_help = true
-enabled = true
+mouse_key_help = false
 font_family = ""
 font_size = 12.0
 # background_color = "#465FBCFF"

@@ -316,6 +316,10 @@ impl Engine {
         self.overlay.key_help_cache = None;
         if active == ModeId::idle() {
             self.overlay.key_help_visible = false;
+        } else if !active.is_window()
+            && (self.registry.active == ModeId::idle() || self.registry.active.is_window())
+        {
+            self.overlay.key_help_visible = self.settings.key_help.mouse_key_help;
         }
         self.input.pending_chords.clear();
         self.registry.active_slot = self.registry.index_of(&active);
