@@ -140,6 +140,7 @@ pub struct WindowSession {
     number: NumberInput,
     swap_source: Option<WindowId>,
     refresh_pending: Option<u64>,
+    closing: BTreeMap<WindowId, u64>,
     edit: Option<LiveEdit>,
     trees: BTreeMap<usize, LayoutTree>,
     resume_quick: bool,
@@ -190,6 +191,7 @@ impl WindowSession {
             number: NumberInput::default(),
             swap_source: None,
             refresh_pending: None,
+            closing: BTreeMap::new(),
             edit: None,
             trees: BTreeMap::new(),
             resume_quick: false,
@@ -600,6 +602,7 @@ impl WindowSession {
                 self.number.cancel();
                 self.swap_source = None;
                 self.refresh_pending = None;
+                self.closing.clear();
                 self.screen = ctx
                     .screens
                     .iter()

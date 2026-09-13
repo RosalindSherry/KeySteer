@@ -5,6 +5,115 @@ use crate::api::Appearance;
 use crate::api::window::WindowResult;
 
 #[test]
+fn close_feedback_keeps_geometry_until_confirmed_and_refreshes_without_timer() {
+    use crate::api::presentation::View;
+    use std::sync::Arc;
+    let config = crate::config::Config::default();
+    let palette = config.palette(Appearance::Dark);
+    let ctx = HostContext {
+        presenter: &crate::presentation::COMPOSER,
+        screens: &[],
+        cursor: Point::default(),
+        focused_app: None,
+        palette: &palette,
+    };
+    for closed in [false, true] {
+        let mut mode = crate::app::mode_catalog::window(&config);
+        mode.session = 1;
+        mode.request = 5;
+        mode.result = 1;
+        let windows: Vec<_> = (1..=2)
+            .map(|id| WindowInfo {
+                id: WindowId(id),
+                title: format!("Window {id}"),
+                app: "test".into(),
+                bounds: Rect::new(0.0, 0.0, 200.0, 100.0),
+                screen: 0,
+                resizable: true,
+                maximized: false,
+                minimized: false,
+                fullscreen: false,
+            })
+            .collect();
+        mode.target = Some(windows[0].clone());
+        mode.inventory = windows.iter().cloned().map(|w| (w.id, w)).collect();
+        mode.rebuild_numbers();
+        let key = ModeEvent::Binding {
+            binding: Arc::new(Binding::Window(W::Close)),
+            state: KeyState::Down,
+            key: Key::new("x").unwrap(),
+        };
+        let commands = mode.handle(&key, &ctx);
+        let close_index = commands.iter().position(|c| matches!(c, Command::WindowRequest(r) if r.operation == WindowOperation::Close(WindowId(1)))).unwrap();
+        let present_index = commands
+            .iter()
+            .position(|c| matches!(c, Command::ShowOverlay(_)))
+            .unwrap();
+        assert!(close_index < present_index);
+        assert!(
+            !commands
+                .iter()
+                .any(|c| matches!(c, Command::SetTimer { .. }))
+        );
+        assert_eq!(mode.status.as_deref(), Some("Close requested"));
+        assert!(
+            mode.indicator_detail()
+                .unwrap()
+                .ends_with("\nClose requested")
+        );
+        assert_eq!(mode.visible, [WindowId(1), WindowId(2)]);
+        assert!(matches!(mode.view(), View::Window(view) if view.target.is_some()));
+        assert!(!mode.handle(&key, &ctx).iter().any(|c| matches!(c, Command::WindowRequest(r) if matches!(r.operation, WindowOperation::Close(_)))));
+        let result = |id, inventory| WindowResult {
+            session: 1,
+            id,
+            tabs: None,
+            closed: vec![],
+            target: Some(windows[0].clone()),
+            windows: inventory,
+            pointer: None,
+            changed: 0,
+            skipped: 0,
+            message: None,
+            edit: None,
+        };
+        mode.window_result(result(5, Some(windows.clone())), &ctx);
+        assert!(
+            !mode.closing.is_empty(),
+            "old inventory cannot acknowledge close"
+        );
+        let commands = mode.window_result(result(6, None), &ctx);
+        assert!(commands.iter().any(
+            |c| matches!(c, Command::WindowRequest(r) if r.operation == WindowOperation::Enumerate)
+        ));
+        assert_eq!(mode.visible, [WindowId(1), WindowId(2)]);
+        let mut confirmed = result(
+            7,
+            Some(if closed {
+                vec![windows[1].clone()]
+            } else {
+                windows.clone()
+            }),
+        );
+        if closed {
+            confirmed.closed.push(WindowId(1));
+            confirmed.target = None;
+        }
+        mode.window_result(confirmed, &ctx);
+        assert!(mode.closing.is_empty());
+        if closed {
+            assert_eq!(mode.visible, [WindowId(2)]);
+            assert_eq!(mode.numbers[&WindowId(2)], 1);
+            assert!(mode.target.is_none());
+        } else {
+            assert_eq!(mode.visible, [WindowId(1), WindowId(2)]);
+            assert_eq!(mode.numbers[&WindowId(2)], 2);
+            assert!(matches!(mode.view(), View::Window(view) if view.target.is_some()));
+        }
+    }
+}
+
+#[test]
 fn tabs_use_move_verbs_and_overview_lists_every_member() {
     use crate::api::{
         Screen,

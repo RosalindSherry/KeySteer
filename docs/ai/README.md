@@ -92,3 +92,6 @@ Window 连续移动的指针稳定、亚像素累积和显示帧等待见 [性�
 
 
 Editor/Tabs 按键几何更新的跨平台局部发布、快照复用及尚存的等待限制见 [性能](07-rendering-and-performance.md)。
+
+
+关闭请求的面板即时反馈、保持标记稳定和立即库存核对见 [模式生命周期](04-modes-and-lifecycle.md)。

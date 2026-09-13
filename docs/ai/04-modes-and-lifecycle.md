@@ -191,3 +191,16 @@ Window、Quick、Editor 支持应用音量动作，保持当前目标、区域�
 
 
 应用输出和系统音频动作沿用 Window/Quick/Editor 的稳定支持集合，保留编辑事务；SystemAudio 即使没有目标窗口也可发出。
+
+
+## Close feedback without speculative hiding
+
+Window Close submits the backend request and updates the lower key-help panel
+status in the same input turn. The status uses the existing detail line below
+the app/title; border and number cards remain stable until confirmed closure.
+A per-session pending request map suppresses duplicate close requests until a
+new authoritative inventory arrives. A close acknowledgement requests inventory
+immediately, without adding a timer. Old inventory cannot resolve a newer close
+request. Save/cancel dialogs therefore do not cause hide/restore flicker; confirmed
+closure retains the existing number compaction. Windows and macOS share this
+mode logic and continue executing native close only in their backends.

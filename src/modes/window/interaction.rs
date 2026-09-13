@@ -227,8 +227,16 @@ impl WindowSession {
             _ if self.edit.is_some() => {}
             W::Size => self.size = !self.size,
             W::Close if self.kind == WindowKind::Move => {
-                if let Some(target) = &self.target {
-                    self.request(WindowOperation::Close(target.id), out);
+                if let Some(id) = self.target.as_ref().map(|w| w.id)
+                    && !self.closing.contains_key(&id)
+                {
+                    // Preserve geometry and numbering until confirmed closure:
+                    // a save dialog must not cause hide/restore flicker.
+                    self.closing.insert(id, self.request + 1);
+                    // Enqueue native work first; the worker runs independently
+                    // while this same input turn presents request feedback.
+                    self.request(WindowOperation::Close(id), out);
+                    self.status = Some("Close requested".into());
                 }
             }
             W::NextScreen | W::PreviousScreen | W::CycleState | W::Center => {

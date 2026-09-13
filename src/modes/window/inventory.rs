@@ -13,6 +13,18 @@ impl WindowSession {
             return out;
         }
         self.result = result.id;
+        let full_inventory = result.windows.is_some()
+            && (result.edit.is_none()
+                || matches!(
+                    result.edit.as_deref(),
+                    Some(WindowEditResult::Started {
+                        full_inventory: true,
+                        ..
+                    })
+                ));
+        self.closing.retain(|id, request| {
+            !result.closed.contains(id) && !(full_inventory && result.id > *request)
+        });
         if let Some(tabs) = result.tabs.take() {
             if self.tabs.state != tabs {
                 self.numbers = tabs.numbers.iter().copied().collect();
@@ -202,6 +214,11 @@ impl WindowSession {
             changed = true;
         }
         if result.id == 1 && !had_inventory {
+            self.refresh(&mut out);
+        }
+        // Submission is not proof of closure. Reconcile immediately, without
+        // waiting for the periodic inventory timer or retiring identities early.
+        if self.closing.values().any(|request| result.id >= *request) {
             self.refresh(&mut out);
         }
         if changed

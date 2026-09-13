@@ -1,5 +1,11 @@
 # 更新日志 / Release Notes
 
+## 0.10.2
+
+修复关闭窗口后，边框、编号等状态仍可能残留的问题。
+
+Fixed an issue where borders, window numbers, and other window state could remain after closing a window.
+
 ## 0.10.1
 
 **改进窗口移动、关闭**
