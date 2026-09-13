@@ -256,3 +256,18 @@ Engine stores an optional window-only visibility override, preserving it across
 submodes and resetting it on fresh entry. The panel toggle does not hide window
 borders/numbers. Explicit binding tables still replace defaults. Serde export and
 ConfigStudio preserve the option; the simulator mirrors defaults and overrides.
+
+
+窗口编号卡片共用唯一的 window.card（WindowCardUi），仅定义在 Window DTO，app/mode_catalog 编译至五种窗口模式。除 window_editor.card 仅覆盖位置外，其他子模式 card 为未知字段，内部导出和网页编辑器均只保存 window.card。未设置颜色继承当前模式 ui／主题，0 字号自动派生，空字体继承。
+
+
+window.card 与各模式 ui 在配置编译时解析为 WindowStyles；运行时 Settings 只持有 Arc，不再持有原始样式 DTO。TOML schema 与导出不变，重载会重新编译两种主题的样式。
+
+
+window.card.position_mode = window|screen，position 为四个百分比字符串（上右下左）；校验对边和不超过 100%。WindowStyles 编译为数值比例，导出保留字符串。
+
+
+Editor 仅覆盖位置：在 [window_editor.card] 设置 position 和可选的 position_mode，颜色、字体及尺寸继续继承 [window.card]。默认 position_mode = "window"，position = ["0%", "50%", "100%", "50%"]，即顶部居中。基础 Window 的位置变更不影响此默认值。Quick、Restore、Tabs 保留原来的定位行为。模拟器在 Window／Editor 中分别编辑对应 position；其他样式仍编辑共享配置。
+
+
+WindowStyles 编译边界进一步收敛：不再保存原始 WindowCardUi，仅保存数值 WindowCardMetrics、比例与已解析样式。原始配置仍由 ConfigFile 保留用于导出与重载。

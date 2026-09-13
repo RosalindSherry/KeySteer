@@ -1,3 +1,4 @@
+import { cardPositionRatios } from '../simulator/window-card-position.ts'
 import { toRaw } from 'vue'
 import { parse, stringify } from 'smol-toml'
 import { parseSplitRatios } from '../simulator/window-ratios.ts'
@@ -53,6 +54,34 @@ export function parseConfigDocument(source: string): ParsedConfigDocument {
     }
   }
   checkBindings(parsed)
+  for (const mode of ['window', 'window_quick', 'window_editor', 'window_restore', 'window_tab']) {
+    const settings: unknown = parsed[mode]
+    const card = isRecord(settings) ? settings.card : undefined
+    if (card === undefined) continue
+    if (mode !== 'window' && mode !== 'window_editor') throw new Error('卡片样式统一使用 window.card')
+    if (!isRecord(card)) throw new Error(`${mode}.card 必须是配置表`)
+    cardPositionRatios(card.position)
+    const ranges: Record<string, [number, number]> = {
+      app_font_size: [0, 256], title_font_size: [0, 256], text_width: [1, 4096],
+      padding_x: [0, 256], padding_y: [0, 256], line_height: [1, 4],
+      min_height: [0, 4096], number_min_width: [0, 4096],
+    }
+    for (const [key, value] of Object.entries(card)) {
+      const range = ranges[key]
+      if (key === 'position') continue
+      if (key === 'position_mode') {
+        if (value !== 'window' && value !== 'screen') throw new Error('window.card.position_mode must be window or screen')
+        continue
+      }
+      if (mode === 'window_editor') throw new Error('window_editor.card 只覆盖位置；其他样式使用 window.card')
+      const valid = range ? typeof value === 'number' && Number.isFinite(value) && value >= range[0] && value <= range[1]
+        : ['app_bold', 'title_bold'].includes(key) ? typeof value === 'boolean'
+          : ['app_font_family', 'title_font_family'].includes(key) ? typeof value === 'string'
+            : ['app_color', 'title_color', 'background_color', 'border_color', 'number_color'].includes(key) ? (typeof value === 'string' ? /^#[\da-f]{8}$/i.test(value)
+              : isRecord(value) && Object.entries(value).every(([appearance, color]) => ['light', 'dark'].includes(appearance) && typeof color === 'string' && /^#[\da-f]{8}$/i.test(color))) : false
+      if (!valid) throw new Error(`${mode}.card.${key} 配置无效`)
+    }
+  }
   parseSplitRatios((parsed.window_quick as Record<string, unknown> | undefined)?.split_ratios)
 
   // Stringifying once catches values that the editor would be unable to save.

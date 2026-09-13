@@ -19,3 +19,8 @@ When `workspace.ksw` exists, opening the simulator from the app menu imports the
 The simulator is helpful for rapid experimentation and previewing, but it is not a complete configuration validator. Complex fields, platform permissions, external commands, and final validation remain the responsibility of KeySteer. See [Configuration](/en/reference/configuration) and [Modes and actions](/en/reference/modes-and-actions) for the full syntax.
 
 The simulator opens in a new page to keep its wide keyboard layout from covering the documentation sidebar. It also works well on a second display.
+
+
+## Visual window card editing
+
+Select Window or an A/E/R/T child mode in the simulator to open the live card editor. Color pickers and opacity sliders control the background, number, app name, title and border. Edit fonts, sizes, weight, corner radius, border width and spacing alongside the preview. Click or drag an anchor, draw a range, adjust the four inset sliders, or choose a positioning preset. Changes update the simulator and exported TOML, with individual reset controls. Positions remain preferences; collision avoidance still applies.

@@ -3,8 +3,12 @@
 ## 0.10.5
 
 - 拆分窗口最大化与最小化操作：`F` 切换最大化／还原，`Shift+F` 切换最小化／还原，不再经过三态循环。按键提示仍合并在一行。
+- 窗口卡片支持自定义颜色、字体、边框和百分比定位；Editor 可独立覆盖位置，自动避让。
+- 模拟器新增卡片可视化编辑，支持拖动定位、样式预览及配置导出。
 
 - Split window maximization and minimization into separate toggles: `F` maximizes/restores, while `Shift+F` minimizes/restores, replacing the three-state cycle. Both shortcuts remain on one help row.
+- Customize window card colors, fonts, borders, and percentage positioning, with an independent Editor position override and automatic collision avoidance.
+- Added visual card editing in the simulator, including drag positioning, live style previews, and configuration export.
 
 ## 0.10.4
 

@@ -107,9 +107,10 @@ impl WindowSession {
                 _ => None,
             });
         View::Window(WindowView {
+            configurable_position: matches!(self.kind, WindowKind::Move | WindowKind::Editor),
             tabs: &self.tabs.state,
             group_input: self.kind == WindowKind::Tab && self.number.slot,
-            ui: &self.settings.ui,
+            styles: &self.settings.styles,
             border_width: self.settings.border_width,
             target: self.target.as_ref().filter(|w| !w.minimized),
             screen: self.screen,

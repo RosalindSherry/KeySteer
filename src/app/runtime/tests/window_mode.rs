@@ -1,4 +1,24 @@
 #[test]
+fn window_size_toggle_updates_cursor_badge_even_with_help_hidden() {
+    for help in [false, true] {
+        let mut config = Config::default();
+        config.key_help.window_key_help = help;
+        let (mut engine, mut backend, log) = window_test_engine(&config);
+        enter_window(&mut engine, &mut backend, &log);
+        for expected in ["Resize", "Move", "Resize"] {
+            for event in [key_down("s"), key_up("s")] {
+                engine.handle_backend_event(event, &mut backend).unwrap();
+            }
+            let scene = log.lock().unwrap().scenes.last().unwrap().clone();
+            let badge = scene.indicator.as_ref().unwrap();
+            assert_eq!(badge.text, format!("Window {expected}"));
+            assert!(badge.held_text.is_none());
+            assert_eq!(engine.window_help_visible(), help);
+        }
+    }
+}
+
+#[test]
 fn window_cursor_indicators_are_compact_and_independent_of_help_panel() {
     let mut config = Config::default();
     config.key_help.window_key_help = false;
@@ -9,7 +29,7 @@ fn window_cursor_indicators_are_compact_and_independent_of_help_panel() {
         (ModeId::window_tab(), "Tabs")] {
         engine.set_active(mode.clone());
         let (indicator, geometry) = engine.build_indicator(&mode).unwrap();
-        assert_eq!(indicator.text, text);
+        assert_eq!(indicator.text, if mode == ModeId::window() { "Window Move" } else { text });
         assert!(indicator.held_text.is_none());
         assert!(!engine.window_help_visible());
         assert_ne!(geometry.position(Point::new(100.0, 100.0), &engine.screens),
@@ -567,7 +587,7 @@ fn window_help_follows_target_not_pointer_and_contains_quick_layout_in_one_panel
     let panel = |scene: &OverlayScene| scene.labels.iter().find(|l| l.text.is_empty()
         && l.z_index == i32::MAX - 1).expect("one rounded help background").rect;
     let initial = log.lock().unwrap().scenes.last().unwrap().clone();
-    assert_eq!(initial.indicator.as_ref().unwrap().text, "Window");
+    assert_eq!(initial.indicator.as_ref().unwrap().text, "Window Move");
     assert!(initial.indicator.as_ref().unwrap().held_text.is_none());
     let bounds = panel(&initial);
     let work = engine.screens[0].work_area;
@@ -836,7 +856,10 @@ fn window_base_motion_ignores_rebound_normal_keys_and_ignores_default_arrows() {
 
 #[test]
 fn window_tree_labels_remain_large_and_avoid_window_cards() {
-    let (mut engine, mut backend, log) = window_test_engine(&Config::default());
+    let mut config = Config::default();
+    config.window.card.position_mode = crate::api::style::WindowCardPositionMode::Screen;
+    config.window.card.position = ["100%", "0%", "0%", "0%"].map(String::from);
+    let (mut engine, mut backend, log) = window_test_engine(&config);
     enter_window(&mut engine, &mut backend, &log);
     for key in ["a", "e"] {
         for event in [key_down(key), key_up(key)] { engine.handle_backend_event(event, &mut backend).unwrap(); }

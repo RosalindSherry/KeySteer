@@ -337,3 +337,6 @@ macOS 原生 Window 验收：`cargo test --lib native_macos_window_parity -- --i
 macOS 原生性能：`python3 tools/test-macos-windows.py --performance --release`。复用已授权的稳定测试应用，1000 次先于等待的重复 mailbox 唤醒检查丢信号；临时 AppKit 窗口逐条接收变更，每次等 AX 通知确认后再发送下一条（2000 次，无移动定时器）；随后交错比较 20,000 对完整快照和几何读取，验证结果等价，写入 `target/native-window-tests/tabs-performance.csv` 的 p50/p95/p99。超时只检测测试故障，不驱动移动。
 
 共享模拟基准也可在 macOS 运行：`KEYSTEER_TABS_BENCH_OUTPUT=target/native-window-tests/tabs-shared-macos.csv cargo test --release --lib tabs_geometry_baseline -- --ignored --nocapture --test-threads=1`。它覆盖 2/10/30 成员的协调层成本和外部窗口写入次数，不是 macOS 原生渲染或屏幕 FPS；原生 AX 耗时同样不等于 compositor 帧率，多屏混合刷新率的视觉效果需单独注明实测硬件。
+
+
+卡片编辑区在 ModeStyleControls 中集中共享 card 与当前模式 ui 控件，CardPositionEditor 的拖动只更新 window.card.position，取消手势恢复先前值；positionFromPoints 测试覆盖反向拖动、点／线与百分比边界。CardStylePreview 随有效配置与主题响应式更新；颜色控件显示继承主题的真实默认颜色。

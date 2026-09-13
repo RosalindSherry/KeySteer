@@ -1,3 +1,4 @@
+import { cardPositionRatios, packedCardCenters } from '../simulator/window-card-position.ts'
 import { computed, defineComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { withBase } from 'vitepress'
 import { stringify } from 'smol-toml'
@@ -785,7 +786,7 @@ export default defineComponent({
                       <div class="ks-demo-window-title">{active.app} · {active.title}</div><div class="ks-demo-window-lines"><i /><i /><i /></div>
                     </div>
                   })}
-                  {isWindowMode(simulator.mode) && !simulator.window.temporary && !simulator.window.library && windowNumberLabels(simulator.window).map(label => <button class="ks-window-number"
+                  {isWindowMode(simulator.mode) && !simulator.window.temporary && !simulator.window.library && windowNumberLabels(simulator.window, simulator.mode === 'window' ? effectiveDocument.value?.window?.card ?? {} : simulator.mode === 'window_editor' ? effectiveDocument.value?.window_editor?.card ?? {} : {}).map(label => <button class="ks-window-number"
                     aria-label={`选择窗口 ${label.number}`} style={{ left: `${label.x}%`, top: `${label.y}%`, fontSize: `${numberSetting(targetingSettings.value.ui?.font_size, 28)}px` }}
                     onMousedown={e => e.preventDefault()} onClick={() => chooseWindowNumber(simulator, label.number, targetingSettings.value)}><b>{label.number}</b><span><strong>{label.app}</strong>{(label.members ?? [label.title]).map(title => <small title={title}>{title}</small>)}</span></button>)}
                   {isWindowMode(simulator.mode) && !simulator.window.temporary && !simulator.window.library && simulator.window.tree && treeSlots(simulator.window.tree).map(slot => {
@@ -1220,7 +1221,30 @@ function targetingAppearance(document: ConfigDocument | null, mode: string, appe
   const borderOverride = ui.line_color ?? ui.border_color ?? ui.matched_border_color
   const configuredBorder = themedColor(borderOverride, accent)
   const border = borderOverride ? configuredBorder : translucent(accent, 60)
+  const card = document?.window?.card ?? {}
+  const numberSize = numberSetting(ui.font_size, 28)
+  const appSize = numberSetting(card.app_font_size, 0) || Math.max(numberSize * .6, 14)
+  const titleSize = numberSetting(card.title_font_size, 0) || Math.max(numberSize * .45, 12)
   return {
+    '--ks-card-app-size': `${appSize}px`,
+    '--ks-card-background': themedColor(card.background_color, labelBackground),
+    '--ks-card-border': themedColor(card.border_color, configuredBorder),
+    '--ks-card-number-color': themedColor(card.number_color, themedColor(ui.text_color, text)),
+    '--ks-card-title-size': `${titleSize}px`,
+    '--ks-card-app-font': String(card.app_font_family || ui.font_family || 'var(--vp-font-family-base)'),
+    '--ks-card-title-font': String(card.title_font_family || ui.font_family || 'var(--vp-font-family-base)'),
+    '--ks-card-app-weight': card.app_bold === false ? '400' : '700',
+    '--ks-card-title-weight': card.title_bold ? '700' : '400',
+    '--ks-card-app-color': themedColor(card.app_color, themedColor(ui.text_color, text)),
+    '--ks-card-title-color': themedColor(card.title_color, themedColor(ui.text_color, text)),
+    '--ks-card-width': `${numberSetting(card.text_width, 260)}px`,
+    '--ks-card-padding-x': `${finiteSetting(card.padding_x, 9)}px`,
+    '--ks-card-padding-y': `${finiteSetting(card.padding_y, 4)}px`,
+    '--ks-card-row-height': `${Math.max(appSize, titleSize) * numberSetting(card.line_height, 1.4)}px`,
+    '--ks-card-min-height': `${finiteSetting(card.min_height, 44)}px`,
+    '--ks-card-number-width': `${Math.max(finiteSetting(card.number_min_width, 38), numberSize * .75 + autoSetting(ui.padding_x, Math.round(numberSize * .4)) * 2)}px`,
+    '--ks-card-radius': `${autoSetting(ui.border_radius, Math.round(numberSize * .35))}px`,
+    '--ks-card-number-padding-y': `${autoSetting(ui.padding_y, Math.round(numberSize * .2))}px`,
     '--ks-target-accent': border,
     '--ks-target-preview-border': translucent(configuredBorder, 35),
     '--ks-target-highlight': themedColor(ui.highlight_color ?? ui.matched_background_color, accentAlt),
@@ -1525,14 +1549,17 @@ function readable(background: string, text = '#10172DFF', alternate = '#FFFFFFFF
 }
 
 
-function windowNumberLabels(state: WindowState): Array<{ number: number; x: number; y: number; app: string; title: string; members?: string[] }> {
+function windowNumberLabels(state: WindowState, card: Record<string, any>): Array<{ number: number; x: number; y: number; app: string; title: string; members?: string[] }> {
+  const [top, right, bottom, left] = cardPositionRatios(card.position)
+  const anchorX = (left + 1 - right) / 2
+  const anchorY = (top + 1 - bottom) / 2
   const labels: Array<{ number: number; x: number; y: number; app: string; title: string; members?: string[] }> = []
   for (const window of state.windows.map(w => ({ ...w, ...tabFrame(activeTabWindow(state, w.id) ?? w) })).filter(w => (state.includeMinimized || !w.minimized) && w.screen === state.screen && state.numbers[w.id] !== undefined).sort((a, b) => state.numbers[a.id] - state.numbers[b.id])) {
     const group = containingTab(state, window.id)
     if (group && (state.tree ? group.members[0] : group.active) !== window.id) continue
     const slot = state.tree ? treeSlots(state.tree).find(s => s.window === window.id) : undefined
-    let x = Math.max(17, Math.min(83, (slot ? slot.rect.x + slot.rect.width / 2 : (window.x + window.width / 2) / WINDOW_AREA.width) * 100))
-    let y = Math.max(6, Math.min(94, slot ? slot.rect.y * 100 + 6 : (window.y + window.height / 2) / WINDOW_AREA.height * 100))
+    let x = Math.max(17, Math.min(83, (slot ? slot.rect.x + slot.rect.width * anchorX : (window.x + window.width * anchorX) / WINDOW_AREA.width) * 100))
+    let y = Math.max(6, Math.min(94, slot ? (card.position ? (slot.rect.y + slot.rect.height * anchorY) * 100 : slot.rect.y * 100 + 6) : (window.y + window.height * anchorY) / WINDOW_AREA.height * 100))
     if (labels.some(l => Math.abs(l.x - x) < 33 && Math.abs(l.y - y) < 10)) {
       let distance = Infinity
       for (let row = 0; row < 9; row++) for (let col = 0; col < 3; col++) {
@@ -1547,6 +1574,10 @@ function windowNumberLabels(state: WindowState): Array<{ number: number; x: numb
         const member = state.windows.find(window => window.id === id)
         return `${id === group.active ? '●' : '○'} ${state.numbers[id]} · ${member?.app ?? ''} — ${member?.title ?? ''}`
       }) })
+  }
+  if (card.position_mode === 'screen') {
+    const centers = packedCardCenters(labels.length, 32, 10, [top, right, bottom, left])
+    labels.forEach((label, i) => Object.assign(label, centers[i]))
   }
   return labels
 }

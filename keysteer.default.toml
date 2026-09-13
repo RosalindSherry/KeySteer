@@ -307,6 +307,30 @@ z = "window_undo"
 "shift+c" = "window_reset_initial"
 q = "idle"
 "primary+q" = "idle"
+[window.card]
+position_mode = "window" # window or screen
+position = ["50%", "50%", "50%", "50%"] # top, right, bottom, left
+# Shared by Window / Quick / Editor / Restore / Tabs.
+# Optional colors: remove the leading # to override the inherited ui/theme color.
+# background_color = { light = "#EEF2FFFF", dark = "#0A1338FF" }
+# border_color = { light = "#465FBCFF", dark = "#6E82D6FF" }
+# number_color = { light = "#10172DFF", dark = "#E8EEFFFF" }
+# app_color = { light = "#10172DFF", dark = "#E8EEFFFF" }
+# title_color = { light = "#10172DFF", dark = "#E8EEFFFF" }
+# 0 = automatic font size; empty font family and omitted colors inherit ui.
+app_font_size = 0.0
+title_font_size = 0.0
+app_font_family = ""
+title_font_family = ""
+app_bold = true
+title_bold = false
+text_width = 260.0
+padding_x = 9.0
+padding_y = 4.0
+line_height = 1.4
+min_height = 44.0
+number_min_width = 38.0
+
 [window.ui]
 font_size = 28
 
@@ -395,6 +419,10 @@ x = "window_remove_region"
 r = "window_restore"
 q = "window"
 "primary+q" = "idle"
+[window_editor.card]
+position_mode = "window"
+position = ["0%", "50%", "100%", "50%"]
+
 [window_editor.ui]
 font_size = 28
 

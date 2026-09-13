@@ -1,8 +1,8 @@
 //! Central window identity cards, selection and BSP region composition.
-use crate::api::overlay::{Color, OverlayLabel, SharedLabelStyle, TextAlignment};
+use crate::api::overlay::{Color, OverlayLabel};
 use crate::api::presentation::WindowView;
 use crate::api::window_layout::placed_rect;
-use crate::api::{HostContext, OverlayScene, OverlayShape, Point, Rect};
+use crate::api::{HostContext, OverlayScene, OverlayShape, Rect};
 
 use super::label_placement::{card_positions, logical};
 use crate::api::overlay::LabelPlacementRole as Role;
@@ -47,15 +47,9 @@ impl WindowView<'_> {
     }
     fn screen_scene(&self, ctx: &HostContext<'_>, next_group: &mut u32) -> OverlayScene {
         let mut scene = OverlayScene::new();
-        let style: SharedLabelStyle = self
-            .ui
-            .resolve(
-                ctx.palette,
-                ctx.palette.surface_label(),
-                ctx.palette.text,
-                ctx.palette.accent,
-            )
-            .into();
+        let resolved = self.styles.for_appearance(ctx.palette.appearance);
+        let card_config = &self.styles.card;
+        let style = &resolved.base;
         let Some(screen) = ctx.screens.get(self.screen) else {
             return scene;
         };
@@ -100,18 +94,9 @@ impl WindowView<'_> {
                 self.border_width,
             ));
         }
-        let mut text_style = (*style).clone();
-        text_style.font_size = (style.font_size * 0.6).max(14.0);
-        text_style.text_alignment = TextAlignment::Left;
-        text_style.background = Color::TRANSPARENT;
-        text_style.border_color = Color::TRANSPARENT;
-        text_style.border_width = 0.0;
-        text_style.padding_x = 0.0;
-        text_style.padding_y = 0.0;
-        let small: SharedLabelStyle = text_style.clone().into();
-        text_style.bold = false;
-        text_style.font_size = (style.font_size * 0.45).max(12.0);
-        let title_style: SharedLabelStyle = text_style.into();
+        let style = &resolved.number;
+        let small = &resolved.app;
+        let title_style = &resolved.title;
         let windows: Vec<_> = self
             .visible
             .iter()
@@ -127,30 +112,20 @@ impl WindowView<'_> {
                 }
             })
             .collect();
-        let centers: Vec<_> = windows
-            .iter()
-            .map(|w| {
-                slots
-                    .iter()
-                    .find(|s| s.window == Some(w.id))
-                    .map_or(w.bounds.center(), |slot| {
-                        let area = placed_rect(screen.work_area, slot.rect, self.gap);
-                        Point::new(area.center().x, area.y + 40.0 * scale)
-                    })
-            })
-            .collect();
         let digits = self
             .numbers
             .values()
-            .map(|n| n.to_string().len())
-            .chain(slots.iter().map(|s| s.id.to_string().len() + 1))
+            .map(|n| n.checked_ilog10().unwrap_or(0) as usize + 1)
+            .chain(
+                slots
+                    .iter()
+                    .map(|s| s.id.checked_ilog10().unwrap_or(0) as usize + 2),
+            )
             .max()
             .unwrap_or(1);
-        let number_width =
-            (style.font_size * 0.75 * digits as f64 + style.padding_x * 2.0).max(38.0);
-        let height = (style.font_size * 1.4 + style.padding_y * 2.0)
-            .max(small.font_size * 1.4 * 2.0 + 8.0)
-            .max(44.0);
+        let number_width = (style.font_size * 0.75 * digits as f64 + style.padding_x * 2.0)
+            .max(card_config.number_min_width);
+        let height = resolved.min_height;
         let lines: Vec<Vec<String>> = windows
             .iter()
             .map(|window| {
@@ -176,8 +151,9 @@ impl WindowView<'_> {
                 }
             })
             .collect();
-        let row_height = small.font_size * 1.4;
-        let max_rows = ((screen.work_area.height / scale - 14.0) / row_height)
+        let row_height = resolved.row_height;
+        let max_rows = ((screen.work_area.height / scale - card_config.padding_y * 2.0 - 6.0)
+            / row_height)
             .floor()
             .max(2.0) as usize;
         let columns = lines
@@ -188,16 +164,59 @@ impl WindowView<'_> {
         let group_height = lines
             .iter()
             .map(|lines| {
-                (lines.len().div_ceil(lines.len().div_ceil(max_rows)) as f64 * row_height + 8.0)
+                (lines.len().div_ceil(lines.len().div_ceil(max_rows)) as f64 * row_height
+                    + card_config.padding_y * 2.0)
                     .max(height)
             })
             .fold(height, f64::max);
-        let (physical_width, positions) = card_positions(
-            &centers,
-            (number_width + 18.0 + 260.0 * columns as f64) * scale,
-            group_height * scale,
-            screen.work_area.inset(3.0 * scale, 3.0 * scale),
-        );
+        let desired_width =
+            (number_width + card_config.padding_x * 2.0 + card_config.text_width * columns as f64)
+                * scale;
+        let area = screen.work_area.inset(3.0 * scale, 3.0 * scale);
+        let position_mode = if self.configurable_position {
+            card_config.position_mode
+        } else {
+            crate::api::style::WindowCardPositionMode::Window
+        };
+        let (physical_width, positions) = match position_mode {
+            crate::api::style::WindowCardPositionMode::Window => {
+                let centers: Vec<_> = windows
+                    .iter()
+                    .map(|w| {
+                        if !self.configurable_position {
+                            return slots.iter().find(|s| s.window == Some(w.id)).map_or(
+                                w.bounds.center(),
+                                |slot| {
+                                    let area = placed_rect(screen.work_area, slot.rect, self.gap);
+                                    crate::api::Point::new(area.center().x, area.y + 40.0 * scale)
+                                },
+                            );
+                        }
+                        let area = slots
+                            .iter()
+                            .find(|s| s.window == Some(w.id))
+                            .map_or(w.bounds, |slot| {
+                                placed_rect(screen.work_area, slot.rect, self.gap)
+                            });
+                        crate::api::Point::new(
+                            area.x + area.width * self.styles.anchor.x,
+                            area.y + area.height * self.styles.anchor.y,
+                        )
+                    })
+                    .collect();
+                card_positions(&centers, desired_width, group_height * scale, area)
+            }
+            crate::api::style::WindowCardPositionMode::Screen => {
+                super::label_placement::screen_card_positions(
+                    windows.len(),
+                    desired_width,
+                    group_height * scale,
+                    area,
+                    self.styles.position,
+                    6.0 * scale,
+                )
+            }
+        };
         let width = physical_width / scale;
         for ((window, footprint), lines) in windows.iter().zip(&positions).zip(&lines) {
             *next_group += 1;
@@ -209,7 +228,7 @@ impl WindowView<'_> {
                 footprint.x,
                 footprint.y,
                 width * scale,
-                (rows as f64 * row_height + 8.0).max(height) * scale,
+                (rows as f64 * row_height + card_config.padding_y * 2.0).max(height) * scale,
             );
 
             if self.tree.is_none()
@@ -225,16 +244,9 @@ impl WindowView<'_> {
                 ));
             }
             scene.push_label(
-                OverlayLabel::new(
-                    "",
-                    card,
-                    crate::api::overlay::LabelStyle {
-                        font_size: 1.0,
-                        ..(*style).clone()
-                    },
-                )
-                .with_z_index(19)
-                .with_placement(group, Role::Background),
+                OverlayLabel::new("", card, resolved.background.clone())
+                    .with_z_index(19)
+                    .with_placement(group, Role::Background),
             );
             let number_rect = Rect::new(card.x, card.y, number_width * scale, card.height);
             scene.push_label(
@@ -242,16 +254,21 @@ impl WindowView<'_> {
                     .with_z_index(20)
                     .with_placement(group, Role::Fixed),
             );
-            let content_width = ((width - number_width - 18.0) / columns as f64).max(1.0);
+            let content_width =
+                ((width - number_width - card_config.padding_x * 2.0) / columns as f64).max(1.0);
             for (line, text) in lines.iter().enumerate() {
-                let label_style = if line == 0 { &small } else { &title_style };
+                let label_style = if line == 0 { small } else { title_style };
                 let rect = Rect::new(
-                    card.x + (number_width + 9.0 + (line / rows) as f64 * content_width) * scale,
-                    card.y + (4.0 + (line % rows) as f64 * row_height) * scale,
+                    card.x
+                        + (number_width
+                            + card_config.padding_x
+                            + (line / rows) as f64 * content_width)
+                            * scale,
+                    card.y + (card_config.padding_y + (line % rows) as f64 * row_height) * scale,
                     content_width * scale,
                     row_height * scale,
                 );
-                crate::presentation::key_help::push_sized_help_text(
+                crate::presentation::key_help::push_sized_shared_help_text(
                     &mut scene,
                     crate::presentation::elide_width(text, content_width / label_style.font_size),
                     rect,
@@ -326,6 +343,92 @@ impl WindowView<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::Point;
+    #[test]
+    fn card_colors_and_large_title_keep_text_separate() {
+        use crate::api::window::{WindowId, WindowInfo};
+        let config = crate::config::Config::parse(
+            r##"[window.card]
+app_font_size = 18
+title_font_size = 30
+app_color = "#123456FF"
+title_color = "#654321FF"
+number_color = "#112233FF"
+background_color = "#ABCDEFEE"
+border_color = "#FEDCBAFF"
+"##,
+        )
+        .unwrap();
+        let palette = config.palette(crate::api::Appearance::Light);
+        let screens = [crate::api::Screen {
+            bounds: Rect::new(0.0, 0.0, 1920.0, 1080.0),
+            work_area: Rect::new(0.0, 0.0, 1920.0, 1080.0),
+            name: None,
+            scale: 1.0,
+            is_primary: true,
+        }];
+        let ctx = HostContext {
+            presenter: &crate::presentation::COMPOSER,
+            screens: &screens,
+            cursor: Point::default(),
+            focused_app: None,
+            palette: &palette,
+        };
+        let id = WindowId(1);
+        let inventory = [(
+            id,
+            WindowInfo {
+                id,
+                app: "Example".into(),
+                title: "Title".into(),
+                bounds: screens[0].work_area,
+                screen: 0,
+                resizable: true,
+                minimized: false,
+                maximized: false,
+                fullscreen: false,
+            },
+        )]
+        .into_iter()
+        .collect();
+        let view = WindowView {
+            configurable_position: true,
+            tabs: &Default::default(),
+            group_input: false,
+            styles: &crate::api::style::WindowStyles::new(
+                &config.window.ui,
+                &config.window.card,
+                &palette,
+                &config.palette(crate::api::Appearance::Dark),
+            ),
+            border_width: 3.0,
+            target: None,
+            screen: 0,
+            inventory: &inventory,
+            visible: &[id],
+            numbers: &[(id, 1)].into_iter().collect(),
+            tree: None,
+            gap: 0.0,
+        };
+        let scene = view.screen_scene(&ctx, &mut 0);
+        let app = scene.labels.iter().find(|l| l.text == "Example").unwrap();
+        let title = scene.labels.iter().find(|l| l.text == "Title").unwrap();
+        let number = scene.labels.iter().find(|l| l.text == "1").unwrap();
+        assert_eq!(app.style.font_size, 18.0);
+        assert_eq!(title.style.font_size, 30.0);
+        assert!(title.rect.y >= app.rect.y + app.rect.height);
+        assert_eq!(app.style.text_color, Color::rgb(0x12, 0x34, 0x56));
+        assert_eq!(title.style.text_color, Color::rgb(0x65, 0x43, 0x21));
+        assert_eq!(number.style.text_color, Color::rgb(0x11, 0x22, 0x33));
+        assert_eq!(number.style.border_color, Color::rgb(0xFE, 0xDC, 0xBA));
+        let repeated = view.screen_scene(&ctx, &mut 0);
+        for (first, second) in scene.labels.iter().zip(repeated.labels.iter()) {
+            assert!(
+                first.style.ptr_eq(&second.style),
+                "static card styles must be reused"
+            );
+        }
+    }
     #[test]
     fn dense_cards_repack_above_help_without_detaching_numbers_or_titles() {
         let scale = 2.0;

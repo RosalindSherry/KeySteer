@@ -93,6 +93,45 @@ impl ConfigFile {
             validate_label_colors(&format!("{name}.ui"), &mode.ui)?;
         }
 
+        {
+            let name = "window";
+            let card = &self.window.card;
+            self.window_editor
+                .card
+                .apply(card)
+                .position_ratios()
+                .map_err(|error| bad(format!("window_editor.card.position: {error}")))?;
+            card.position_ratios()
+                .map_err(|error| bad(format!("window.card.position: {error}")))?;
+            for (field, value, min, max) in [
+                ("app_font_size", card.app_font_size, 0.0, 256.0),
+                ("title_font_size", card.title_font_size, 0.0, 256.0),
+                ("text_width", card.text_width, 1.0, 4096.0),
+                ("padding_x", card.padding_x, 0.0, 256.0),
+                ("padding_y", card.padding_y, 0.0, 256.0),
+                ("line_height", card.line_height, 1.0, 4.0),
+                ("min_height", card.min_height, 0.0, 4096.0),
+                ("number_min_width", card.number_min_width, 0.0, 4096.0),
+            ] {
+                if !value.is_finite() || !(min..=max).contains(&value) {
+                    return Err(bad(format!(
+                        "{name}.card.{field} must be finite and {min}..={max}"
+                    )));
+                }
+            }
+            validate_optional_color(
+                "window.card.background_color",
+                card.background_color.as_ref(),
+            )?;
+            validate_optional_color("window.card.border_color", card.border_color.as_ref())?;
+            validate_optional_color("window.card.number_color", card.number_color.as_ref())?;
+            validate_optional_color(&format!("{name}.card.app_color"), card.app_color.as_ref())?;
+            validate_optional_color(
+                &format!("{name}.card.title_color"),
+                card.title_color.as_ref(),
+            )?;
+        }
+
         let help = &self.key_help;
         for (name, value) in [
             ("font_size", help.font_size),

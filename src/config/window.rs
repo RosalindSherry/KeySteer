@@ -108,13 +108,41 @@ macro_rules! window_config {
     }
 }
 window_config!(Window {
+    card: crate::api::style::WindowCardUi,
     move_step: f64,
     move_speed: f64,
     resize_step: f64,
     resize_speed: f64
 });
 window_config!(WindowQuick { split_ratios: Vec<SplitRatio>, gap: f64 });
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct EditorCard {
+    pub position: [String; 4],
+    pub position_mode: crate::api::style::WindowCardPositionMode,
+}
+impl Default for EditorCard {
+    fn default() -> Self {
+        Self {
+            position: ["0%", "50%", "100%", "50%"].map(String::from),
+            position_mode: crate::api::style::WindowCardPositionMode::Window,
+        }
+    }
+}
+impl EditorCard {
+    pub fn apply(
+        &self,
+        shared: &crate::api::style::WindowCardUi,
+    ) -> crate::api::style::WindowCardUi {
+        crate::api::style::WindowCardUi {
+            position: self.position.clone(),
+            position_mode: self.position_mode,
+            ..shared.clone()
+        }
+    }
+}
 window_config!(WindowEditor {
+    card: EditorCard,
     resize_step: f64,
     resize_speed: f64,
     gap: f64
@@ -142,6 +170,7 @@ fn common(back: ModeId, actions: &[(&str, W)], modes: &[(&str, ModeId)]) -> Wind
 impl Default for Window {
     fn default() -> Self {
         Self {
+            card: Default::default(),
             common: common(
                 ModeId::idle(),
                 &[
@@ -228,6 +257,7 @@ impl Default for WindowEditor {
     fn default() -> Self {
         use crate::api::Direction::*;
         Self {
+            card: EditorCard::default(),
             common: common(
                 ModeId::window(),
                 &[

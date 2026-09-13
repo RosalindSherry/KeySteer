@@ -175,6 +175,11 @@ fn window_settings(config: &Config, kind: modes::window::WindowKind) -> modes::w
         K::Restore => &config.window_restore.common,
         K::Tab => &config.window_tab.common,
     };
+    let card = if kind == K::Editor {
+        config.window_editor.card.apply(&config.window.card)
+    } else {
+        config.window.card.clone()
+    };
     modes::window::Settings {
         all_screens: common.screens == crate::config::WindowScreens::All,
         include_minimized: common.include_minimized,
@@ -208,7 +213,13 @@ fn window_settings(config: &Config, kind: modes::window::WindowKind) -> modes::w
             _ => config.window_editor.gap,
         },
         border_width: common.border_width,
-        ui: common.ui.clone(),
+        styles: crate::api::style::WindowStyles::new(
+            &common.ui,
+            &card,
+            &config.palette(crate::api::Appearance::Light),
+            &config.palette(crate::api::Appearance::Dark),
+        )
+        .into(),
     }
 }
 fn window_family(config: &Config) -> Vec<modes::window::WindowMode> {

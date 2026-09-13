@@ -799,6 +799,11 @@ pub trait Mode: Send {
         None
     }
 
+    /// Compact cursor-badge detail, independently of longer help-panel content.
+    fn cursor_indicator_detail(&self) -> Option<String> {
+        self.indicator_detail()
+    }
+
     /// Anchor for a persistent, host-rendered key-help panel. Coordinates use
     /// the same desktop space as overlay scenes; native handles stay private.
     fn help_anchor(&self) -> Option<Rect> {

@@ -367,3 +367,25 @@ Edit, Restore, Tabs). It follows the existing native position-only update path
 on Windows and macOS, without a new timer. Window detail stays in the bottom
 help panel, not in the cursor badge. mode_indicator controls this indicator
 independently of key_help.window_key_help. Configured mode text/styles still win.
+
+
+Window cursor badges append Move/Resize to the mode name on the same line, matching the S
+toggle, even with the bottom help hidden. Mode::cursor_indicator_detail separates
+this state from the full help detail; other window submodes omit the second line.
+Other modes inherit their existing indicator_detail behavior. Position-only
+updates still reuse the native badge and do not introduce timers.
+
+
+窗口身份卡片使用共享 window.card 控制字体、颜色和逻辑尺寸；程序名／标题行高取较大字号，避免自定义标题重叠。沿用统一场景、标签避让和原生字体缓存，不新增原生 API 或定时器。
+
+
+WindowStyles 在 mode_catalog 编译配置时生成浅／深两套 ResolvedWindowStyle，通过 Arc 随 Settings 共享。颜色解析、字体字符串复制、自动字号／行高和背景样式只在此时计算；WindowView 按 Appearance 借用，场景只克隆 SharedLabelStyle 引用。配置重载重建模式与样式；主题切换选择已编译变体，DPI 几何仍在各屏绘制时计算。
+
+
+卡片定位通过编译后的百分比计算当前窗口／布局区域中心或当前屏幕工作区的集中排列。screen_card_positions 生成横向换行首选矩形，点区域使用最小周长选择紧凑行列；每屏重新计算 DPI 几何，不缓存像素坐标。后续统一避让照常执行，配置范围不是强制裁剪。网页 window-card-position.ts 镜像解析和排放规则。
+
+
+WindowView.configurable_position 仅对 Move／Editor 开启。EditorCard 仅保存 position、position_mode，在 mode_catalog 覆盖共享 WindowCardUi 的定位字段后编译；其他子模式保留树布局顶部锚点与普通窗口中心。
+
+
+样式编译后仅保留 WindowCardMetrics 数值和共享绘制样式，不保留 WindowCardUi 字符串／颜色 DTO；中心比例提前派生。屏幕集中排列跳过逐窗口锚点 Vec 和区域查询，编号位数使用整数运算。动态窗口几何、屏幕 DPI、行列和碰撞仍在当前场景计算，避免静态缓存导致过期位置。测试验证 1000 次主题样式选择与共享引用克隆无堆分配。

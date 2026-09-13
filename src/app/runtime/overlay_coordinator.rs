@@ -409,7 +409,7 @@ impl Engine {
         display_mode: &ModeId,
     ) -> Option<(Indicator, IndicatorGeometry)> {
         let mode = self.registry.get(display_mode)?;
-        let (text, ui) = self.settings.mode_indicator.for_mode_with(
+        let (mut text, ui) = self.settings.mode_indicator.for_mode_with(
             display_mode.as_str(),
             || match display_mode.as_str() {
                 "window" => "Window".into(),
@@ -426,9 +426,14 @@ impl Engine {
             .unwrap_or_else(|| self.palette.surface_label());
         // Window detail belongs to the bottom panel; the cursor badge stays
         // compact and uses the existing native position-only follow path.
-        let held_text = (!display_mode.is_window())
-            .then(|| mode.indicator_detail())
-            .flatten()
+        let mut detail = mode.cursor_indicator_detail();
+        if display_mode == &ModeId::window()
+            && let Some(state) = detail.take()
+        {
+            text.push(' ');
+            text.push_str(&state);
+        }
+        let held_text = detail
             .map(|value| HeldTargetsText {
                 character_count: value.chars().count(),
                 value,

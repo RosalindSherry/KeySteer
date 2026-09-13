@@ -115,3 +115,21 @@ Window / AERT 鼠标下模式指示器与独立面板显示见 [性能与覆盖�
 
 
 F / Shift+F 独立状态切换与单行提示见 [配置](03-configuration.md) 和 [后端](06-platform-backends.md)。
+
+
+Window 的 S 切换同步鼠标下 Move/Resize，见 [API](02-runtime-and-api.md) 和 [覆盖层](07-rendering-and-performance.md)。
+
+
+窗口编号卡片共享样式 window.card 见 [配置](03-configuration.md) 与 [渲染](07-rendering-and-performance.md)。
+
+
+窗口样式加载时编译、浅深主题变体与共享引用复用见 [配置](03-configuration.md) 和 [性能](07-rendering-and-performance.md)。
+
+
+窗口卡片百分比范围、当前屏幕集中排列和避让见 [配置](03-configuration.md) 与 [性能](07-rendering-and-performance.md)。
+
+
+模拟器卡片样式与拖动定位编辑见 [项目地图](01-project-map.md) 和 [验证](08-build-docs-and-tests.md)。
+
+
+卡片数值化运行时数据、屏幕排列短路径和零分配样式复用见 [配置](03-configuration.md) 与 [性能](07-rendering-and-performance.md)。

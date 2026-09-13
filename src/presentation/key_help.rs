@@ -955,6 +955,16 @@ pub(crate) fn push_sized_help_text(
     style: &LabelStyle,
     scale: f64,
 ) {
+    push_sized_shared_help_text(scene, text, cell, &style.clone().into(), scale);
+}
+
+pub(crate) fn push_sized_shared_help_text(
+    scene: &mut OverlayScene,
+    text: String,
+    cell: Rect,
+    style: &crate::api::overlay::SharedLabelStyle,
+    scale: f64,
+) {
     let estimated_width = style.font_size
         * if style.text_alignment == TextAlignment::Left {
             super::text_units(&text).max(0.75)

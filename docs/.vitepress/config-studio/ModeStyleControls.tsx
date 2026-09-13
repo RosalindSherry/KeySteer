@@ -1,3 +1,6 @@
+import { cardPositionRatios } from '../simulator/window-card-position.ts'
+import CardPositionEditor from './CardPositionEditor'
+import CardStylePreview from './CardStylePreview'
 import { parseSplitRatios } from '../simulator/window-ratios.ts'
 import { computed, defineComponent } from 'vue'
 import {
@@ -10,7 +13,7 @@ import {
 
 type TargetingMode = 'grid' | 'recursive_grid' | 'ui_hint' | 'key_help' | 'window' | 'window_quick' | 'window_editor' | 'window_restore' | 'window_tab'
 type Appearance = 'dark' | 'light'
-type ControlKind = 'color' | 'number' | 'text' | 'boolean' | 'select' | 'ratios'
+type ControlKind = 'color' | 'number' | 'text' | 'boolean' | 'select' | 'ratios' | 'percentages'
 
 interface StyleField {
   path: string
@@ -142,8 +145,34 @@ const fields = {
   },
 } as Record<TargetingMode, ModeFields>
 
+fields.window.layout.push({ path: 'window.card.position_mode', label: '卡片定位（window 窗口 / screen 当前屏幕）', kind: 'select', options: ['window', 'screen'] })
+fields.window.layout.push({ path: 'window.card.position', label: '上、右、下、左（四个百分比，逗号分隔）', kind: 'percentages' })
+fields.window.colors.push({ path: 'window.card.border_color', label: '卡片边框颜色', kind: 'color' })
+fields.window.colors.push({ path: 'window.card.background_color', label: '卡片背景', kind: 'color' })
+fields.window.colors.push({ path: 'window.card.number_color', label: '编号文字', kind: 'color' })
+fields.window.colors.push({ path: 'window.card.app_color', label: '程序名颜色', kind: 'color' })
+fields.window.colors.push({ path: 'window.card.title_color', label: '标题颜色', kind: 'color' })
+fields.window.advanced.push({ path: 'window.ui.font_size', label: '编号字号', kind: 'number', min: 1, max: 256 })
+fields.window.advanced.push({ path: 'window.ui.font_family', label: '编号字体', kind: 'text' })
+fields.window.advanced.push({ path: 'window.ui.border_radius', label: '卡片圆角（-1 自动）', kind: 'number', min: -1, max: 256 })
+fields.window.advanced.push({ path: 'window.ui.border_width', label: '卡片边框宽度', kind: 'number', min: 0, max: 20 })
+fields.window.advanced.push({ path: 'window.card.app_font_size', label: '程序名字号（0 自动）', kind: 'number', min: 0, max: 256 })
+fields.window.advanced.push({ path: 'window.card.title_font_size', label: '标题字号（0 自动）', kind: 'number', min: 0, max: 256 })
+fields.window.advanced.push({ path: 'window.card.app_font_family', label: '程序名字体（空值继承）', kind: 'text' })
+fields.window.advanced.push({ path: 'window.card.title_font_family', label: '标题字体（空值继承）', kind: 'text' })
+fields.window.advanced.push({ path: 'window.card.app_bold', label: '程序名加粗', kind: 'boolean' })
+fields.window.advanced.push({ path: 'window.card.title_bold', label: '标题加粗', kind: 'boolean' })
+fields.window.advanced.push({ path: 'window.card.text_width', label: '每列文字宽度', kind: 'number', min: 1, max: 4096 })
+fields.window.advanced.push({ path: 'window.card.padding_x', label: '文字水平内边距', kind: 'number', min: 0, max: 256 })
+fields.window.advanced.push({ path: 'window.card.padding_y', label: '文字垂直内边距', kind: 'number', min: 0, max: 256 })
+fields.window.advanced.push({ path: 'window.card.line_height', label: '文字行高倍数', kind: 'number', min: 1, max: 4, step: 0.1 })
+fields.window.advanced.push({ path: 'window.card.min_height', label: '卡片最小高度', kind: 'number', min: 0, max: 4096 })
+fields.window.advanced.push({ path: 'window.card.number_min_width', label: '编号最小宽度', kind: 'number', min: 0, max: 4096 })
+fields.window.advanced.push({ path: 'window.ui.padding_x', label: '编号水平内边距（-1 自动）', kind: 'number', min: -1, max: 256 })
+fields.window.advanced.push({ path: 'window.ui.padding_y', label: '编号垂直内边距（-1 自动）', kind: 'number', min: -1, max: 256 })
+
 for (const mode of ['window_quick', 'window_editor', 'window_restore', 'window_tab'] as const) {
-  const common = (items: StyleField[]) => items.filter(f => !/window\.(move_|resize_)/.test(f.path)).map(f => ({ ...f, path: f.path.replace(/^window\./, `${mode}.`) }))
+  const common = (items: StyleField[]) => items.filter(f => !/window\.(move_|resize_)/.test(f.path) && (mode === 'window_editor' || !f.path.startsWith('window.card.position'))).map(f => ({ ...f, path: f.path.replace(/^window\.(?!card\.(?!position))/, `${mode}.`) }))
   ;(fields as Record<string, ModeFields>)[mode] = { colors: common(fields.window.colors), layout: common(fields.window.layout), advanced: common(fields.window.advanced) }
   const own = (fields as Record<string, ModeFields>)[mode]
   if (mode === 'window_quick') own.layout.push({ path: `${mode}.split_ratios`, label: '比例（逗号分隔，支持分数）', kind: 'ratios' })
@@ -174,7 +203,22 @@ export default defineComponent({
     appearanceChange: (_appearance: Appearance) => true,
   },
   setup(props, { emit }) {
+    const positionRoot = computed(() => props.mode === 'window_editor' ? 'window_editor.card' : 'window.card')
     const modeFields = computed(() => fields[props.mode])
+    const isCardField = (field: StyleField) => props.mode.startsWith('window') &&
+      ((field.path.startsWith('window.card.') || field.path.startsWith('window_editor.card.')) || /^window(?:_\w+)?\.ui\./.test(field.path))
+    const fieldValue = (field: StyleField): unknown => {
+      const configured = getConfigPath(props.effectiveDocument, field.path)
+      if (configured !== undefined || !isCardField(field)) return configured
+      if (field.path.endsWith('.ui.border_width')) return 1
+      if (field.kind !== 'color') return undefined
+      const ui = props.effectiveDocument[props.mode]?.ui ?? {}
+      const key = field.path.split('.').at(-1)
+      const source = key === 'background_color' ? 'surface' : key === 'border_color' ? 'accent' : 'text'
+      const inherited = ui[key === 'background_color' ? 'background_color' : key === 'border_color' ? 'border_color' : 'text_color']
+      return Object.fromEntries(['light', 'dark'].map(appearance => [appearance,
+        (typeof inherited === 'string' ? inherited : inherited?.[appearance]) ?? props.effectiveDocument.theme?.[appearance]?.[source] ?? (appearance === 'dark' ? '#E8EEFFFF' : '#17327AFF')]))
+    }
 
     function update(path: string, value: unknown): void {
       const next = cloneConfigDocument(props.document)
@@ -193,7 +237,7 @@ export default defineComponent({
         {items.map((field) => (
           <StyleControl
             field={field}
-            value={getConfigPath(props.effectiveDocument, field.path)}
+            value={fieldValue(field)}
             appearance={props.appearance}
             inherited={getConfigPath(props.document, field.path) === undefined}
             onUpdate={(value) => update(field.path, value)}
@@ -221,21 +265,36 @@ export default defineComponent({
               ))}
             </div>
           </div>
+          {props.mode.startsWith('window') && <div class="ks-style-section ks-card-editor">
+            <CardStylePreview document={props.effectiveDocument} mode={props.mode} appearance={props.appearance} />
+            <div class="ks-card-editor-controls">
+              <strong>颜色、透明度与边框</strong>
+              {renderFields(modeFields.value.colors.filter(isCardField))}
+              <strong>字体、尺寸与间距</strong>
+              {renderFields(modeFields.value.advanced.filter(isCardField))}
+            </div>
+            <strong>位置与排列</strong>
+            {renderFields(modeFields.value.layout.filter(isCardField))}
+            {['window', 'window_editor'].includes(props.mode) && <CardPositionEditor
+              position={getConfigPath(props.effectiveDocument, positionRoot.value + '.position') as string[] ?? ['50%', '50%', '50%', '50%']}
+              reference={String(getConfigPath(props.effectiveDocument, positionRoot.value + '.position_mode') ?? 'window')}
+              onChange={value => update(positionRoot.value + '.position', value)} />}
+          </div>}
           <div class="ks-style-section">
             <span class="ks-style-section-label">{props.appearance === 'dark' ? '深色主题' : '浅色主题'}</span>
             {renderFields(palette)}
           </div>
           <div class="ks-style-section">
             <span class="ks-style-section-label">模式颜色</span>
-            {renderFields(modeFields.value.colors)}
+            {renderFields(modeFields.value.colors.filter(field => !isCardField(field)))}
           </div>
           <div class="ks-style-section">
             <span class="ks-style-section-label">常用布局</span>
-            {renderFields(modeFields.value.layout)}
+            {renderFields(modeFields.value.layout.filter(field => !isCardField(field)))}
           </div>
           <details class="ks-style-advanced">
             <summary>高级样式</summary>
-            {renderFields(modeFields.value.advanced)}
+            {renderFields(modeFields.value.advanced.filter(field => !isCardField(field)))}
           </details>
         </div>
       )
@@ -268,7 +327,17 @@ const StyleControl = defineComponent({
             <div class="ks-style-color">
               <input type="color" value={normalizeColor(value, props.appearance)} onInput={(event) => updateColor(withAlpha((event.target as HTMLInputElement).value, value))} />
               <input value={String(value)} onInput={(event) => updateColor((event.target as HTMLInputElement).value)} />
+              <input class="ks-color-alpha" type="range" aria-label={`${field.label}不透明度`} title="不透明度" min="0" max="255"
+                value={/^#[0-9a-f]{8}$/i.test(String(value)) ? parseInt(String(value).slice(7), 16) : 255}
+                onInput={event => updateColor(`${normalizeColor(value, props.appearance)}${Number((event.target as HTMLInputElement).value).toString(16).padStart(2, '0')}`)} />
             </div>
+          ) : field.kind === 'percentages' ? (
+            <input value={Array.isArray(value) ? value.join(', ') : String(value)} onChange={event => {
+              const input = event.target as HTMLInputElement
+              const values = input.value.split(',').map(part => part.trim())
+              try { cardPositionRatios(values); input.setCustomValidity(''); props.onUpdate(values) }
+              catch (error) { input.setCustomValidity(String(error)); input.reportValidity() }
+            }} />
           ) : field.kind === 'ratios' ? (
             <input value={Array.isArray(value) ? value.join(', ') : String(value)} onChange={event => {
               const input = event.target as HTMLInputElement

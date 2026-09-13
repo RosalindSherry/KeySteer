@@ -137,3 +137,6 @@ macOS：
 
 
 `src/platform/common/audio_worker.rs`：懒启动的独立音频 worker，64 项有界队列、会话取消标记和有界退出。窗口 worker 只解析活动成员与进程创建身份，音频线程重新验证身份后执行原生调用。
+
+- docs/.vitepress/config-studio/CardPositionEditor.tsx：百分比定位图、Pointer Capture 拖动、预设和四边滑块。
+- docs/.vitepress/config-studio/CardStylePreview.tsx：卡片字体、颜色、透明度和几何的实时独立预览。

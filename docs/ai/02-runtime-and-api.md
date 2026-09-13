@@ -308,3 +308,9 @@ Tabs 原生事件区分 GeometryChanged、MoveResizeStarted/Ended 与 Changed（
 
 
 关闭回收：X 的原生关闭请求仍为异步。完整库存确认被请求关闭的窗口不再存在于候选列表时，也回收隐藏到托盘但句柄仍存活的逻辑窗口；取消扫描和仍可见的保存对话框不构成关闭确认。closed 结果优先于旧快照，移除目标边框与编号。关闭后窗口编号按原相对次序压紧为 1..N，恢复出现的窗口追加新编号；普通最小化/屏幕过滤仍保留号码，标签组编号不变。Rust 回归覆盖托盘句柄、取消库存、拒绝关闭和旧快照，网页模拟器同步编号压紧。
+
+
+Mode::cursor_indicator_detail defaults to indicator_detail and allows a compact
+cursor-badge status separate from the full help-panel content. Window returns
+Move/Resize here; the engine appends it to the Window name on the same line.
+Its existing indicator_detail remains the panel detail.

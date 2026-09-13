@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::api::backend::Appearance;
-use crate::api::overlay::{Color, LabelStyle, Placement};
+use crate::api::overlay::{Color, LabelStyle, Placement, SharedLabelStyle, TextAlignment};
 
 use super::theme::{Palette, ThemedColor};
 
@@ -169,6 +169,91 @@ pub fn resolve(configured: Option<&ThemedColor>, appearance: Appearance, derived
     configured
         .and_then(|c| c.resolve(appearance))
         .unwrap_or(derived)
+}
+
+/// Window identity card text and layout, in logical pixels.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WindowCardUi {
+    pub position_mode: WindowCardPositionMode,
+    /// CSS inset order: top, right, bottom, left. Percentages only.
+    pub position: [String; 4],
+    /// Zero retains the automatic size derived from the number font.
+    pub app_font_size: f64,
+    pub title_font_size: f64,
+    /// Empty inherits the number font family.
+    pub app_font_family: String,
+    pub title_font_family: String,
+    pub app_bold: bool,
+    pub title_bold: bool,
+    pub app_color: Option<ThemedColor>,
+    pub title_color: Option<ThemedColor>,
+    pub background_color: Option<ThemedColor>,
+    pub border_color: Option<ThemedColor>,
+    pub number_color: Option<ThemedColor>,
+    pub text_width: f64,
+    pub padding_x: f64,
+    pub padding_y: f64,
+    pub line_height: f64,
+    pub min_height: f64,
+    pub number_min_width: f64,
+}
+
+impl Default for WindowCardUi {
+    fn default() -> Self {
+        Self {
+            position_mode: WindowCardPositionMode::Window,
+            position: std::array::from_fn(|_| "50%".into()),
+            app_font_size: 0.0,
+            title_font_size: 0.0,
+            app_font_family: String::new(),
+            title_font_family: String::new(),
+            app_bold: true,
+            title_bold: false,
+            app_color: None,
+            title_color: None,
+            background_color: None,
+            border_color: None,
+            number_color: None,
+            text_width: 260.0,
+            padding_x: 9.0,
+            padding_y: 4.0,
+            line_height: 1.4,
+            min_height: 44.0,
+            number_min_width: 38.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowCardPositionMode {
+    #[default]
+    Window,
+    Screen,
+}
+
+impl WindowCardUi {
+    pub fn position_ratios(&self) -> Result<[f64; 4], &'static str> {
+        let mut ratios = [0.0; 4];
+        for (result, source) in ratios.iter_mut().zip(&self.position) {
+            let value = source
+                .trim()
+                .strip_suffix('%')
+                .ok_or("position requires four percentages")?;
+            *result = value
+                .parse::<f64>()
+                .map_err(|_| "invalid position percentage")?
+                / 100.0;
+            if !result.is_finite() || !(0.0..=1.0).contains(result) {
+                return Err("position percentages must be 0%..=100%");
+            }
+        }
+        if ratios[0] + ratios[2] > 1.0 + 1e-12 || ratios[1] + ratios[3] > 1.0 + 1e-12 {
+            return Err("opposite position percentages must sum to at most 100%");
+        }
+        Ok(ratios)
+    }
 }
 
 /// Visual style shared by hint labels, grid cells and badges.
@@ -607,6 +692,238 @@ impl Default for KeyHelp {
             border_radius: 10.0,
             padding_x: 24.0,
             padding_y: 8.0,
+        }
+    }
+}
+
+// Compiled once per configuration generation; scene construction only borrows these styles.
+#[derive(Debug)]
+pub struct WindowStyles {
+    pub card: WindowCardMetrics,
+    pub position: [f64; 4],
+    pub anchor: crate::api::Point,
+    light: ResolvedWindowStyle,
+    dark: ResolvedWindowStyle,
+}
+
+/// Numeric runtime data only; source strings remain in the configuration DTO.
+#[derive(Debug, Clone, Copy)]
+pub struct WindowCardMetrics {
+    pub position_mode: WindowCardPositionMode,
+    pub text_width: f64,
+    pub padding_x: f64,
+    pub padding_y: f64,
+    pub number_min_width: f64,
+}
+
+#[derive(Debug)]
+pub struct ResolvedWindowStyle {
+    pub base: SharedLabelStyle,
+    pub number: SharedLabelStyle,
+    pub background: SharedLabelStyle,
+    pub app: SharedLabelStyle,
+    pub title: SharedLabelStyle,
+    pub row_height: f64,
+    pub min_height: f64,
+}
+
+impl WindowStyles {
+    pub fn new(ui: &LabelUi, card: &WindowCardUi, light: &Palette, dark: &Palette) -> Self {
+        let position = card
+            .position_ratios()
+            .unwrap_or_else(|error| panic!("window style requires validated position: {error}"));
+        Self {
+            card: WindowCardMetrics {
+                position_mode: card.position_mode,
+                text_width: card.text_width,
+                padding_x: card.padding_x,
+                padding_y: card.padding_y,
+                number_min_width: card.number_min_width,
+            },
+            position,
+            anchor: crate::api::Point::new(
+                position[3] + (1.0 - position[3] - position[1]).max(0.0) / 2.0,
+                position[0] + (1.0 - position[0] - position[2]).max(0.0) / 2.0,
+            ),
+            light: ResolvedWindowStyle::new(ui, card, light),
+            dark: ResolvedWindowStyle::new(ui, card, dark),
+        }
+    }
+
+    pub fn for_appearance(&self, appearance: Appearance) -> &ResolvedWindowStyle {
+        match appearance {
+            Appearance::Light => &self.light,
+            Appearance::Dark => &self.dark,
+        }
+    }
+}
+
+#[cfg(test)]
+mod window_styles_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_card_style_selection_and_cloning_do_not_allocate() {
+        let config = crate::config::Config::default();
+        let light = config.palette(Appearance::Light);
+        let dark = config.palette(Appearance::Dark);
+        let styles = WindowStyles::new(&config.window.ui, &config.window.card, &light, &dark);
+        let region = stats_alloc::Region::new(crate::TEST_ALLOCATOR);
+        for i in 0..1000 {
+            let resolved = styles.for_appearance(if i % 2 == 0 {
+                Appearance::Light
+            } else {
+                Appearance::Dark
+            });
+            std::hint::black_box((
+                resolved.app.clone(),
+                resolved.title.clone(),
+                resolved.number.clone(),
+                resolved.background.clone(),
+            ));
+            std::hint::black_box((styles.anchor, styles.card));
+        }
+        let stats = region.change();
+        assert_eq!(stats.allocations, 0);
+        assert_eq!(stats.reallocations, 0);
+    }
+
+    #[test]
+    fn card_position_requires_percentages_and_survives_export() {
+        for position in [
+            r#"["50%", "50%", "50%", "50%"]"#,
+            r#"["0%", "0%", "100%", "0%"]"#,
+        ] {
+            let config = crate::config::Config::parse(&format!(
+                "[window.card]\nposition_mode = 'screen'\nposition = {position}"
+            ))
+            .unwrap();
+            config.validate().unwrap();
+            let restored = crate::config::Config::parse(&config.to_toml().unwrap()).unwrap();
+            assert_eq!(config.window.card, restored.window.card);
+        }
+        for position in [
+            r#"["50", "50%", "50%", "50%"]"#,
+            r#"["101%", "0%", "0%", "0%"]"#,
+            r#"["60%", "0%", "50%", "0%"]"#,
+            r#"["NaN%", "0%", "0%", "0%"]"#,
+        ] {
+            let config =
+                crate::config::Config::parse(&format!("[window.card]\nposition = {position}"))
+                    .unwrap();
+            assert!(config.validate().is_err());
+        }
+        assert!(crate::config::Config::parse("[window.card]\nposition = [50,50,50,50]").is_err());
+    }
+
+    #[test]
+    fn theme_selection_reuses_styles_and_new_configuration_recompiles() {
+        let config = crate::config::Config::default();
+        let light = config.palette(Appearance::Light);
+        let dark = config.palette(Appearance::Dark);
+        let styles = WindowStyles::new(&config.window.ui, &config.window.card, &light, &dark);
+        for (appearance, palette) in [(Appearance::Light, &light), (Appearance::Dark, &dark)] {
+            let first = styles.for_appearance(appearance);
+            let again = styles.for_appearance(appearance);
+            assert!(first.app.ptr_eq(&again.app));
+            assert_eq!(first.app.text_color, palette.text);
+        }
+        let mut changed = config.window.card.clone();
+        changed.app_font_size = 35.0;
+        let replacement = WindowStyles::new(&config.window.ui, &changed, &light, &dark);
+        assert_eq!(
+            replacement.for_appearance(Appearance::Light).app.font_size,
+            35.0
+        );
+        assert_ne!(styles.for_appearance(Appearance::Light).app.font_size, 35.0);
+    }
+}
+
+impl ResolvedWindowStyle {
+    fn new(ui: &LabelUi, card: &WindowCardUi, palette: &Palette) -> Self {
+        let style: SharedLabelStyle = ui
+            .resolve(
+                palette,
+                palette.surface_label(),
+                palette.text,
+                palette.accent,
+            )
+            .into();
+        let base = style.clone();
+        let inherited_text = style.text_color;
+        let mut card_style = (*style).clone();
+        card_style.background = crate::api::style::resolve(
+            card.background_color.as_ref(),
+            palette.appearance,
+            style.background,
+        );
+        card_style.border_color = crate::api::style::resolve(
+            card.border_color.as_ref(),
+            palette.appearance,
+            style.border_color,
+        );
+        card_style.text_color = crate::api::style::resolve(
+            card.number_color.as_ref(),
+            palette.appearance,
+            inherited_text,
+        );
+        let style: SharedLabelStyle = card_style.into();
+        let mut text_style = (*style).clone();
+        text_style.font_size = if card.app_font_size > 0.0 {
+            card.app_font_size
+        } else {
+            (style.font_size * 0.6).max(14.0)
+        };
+        text_style.bold = card.app_bold;
+        text_style.text_color =
+            crate::api::style::resolve(card.app_color.as_ref(), palette.appearance, inherited_text);
+        if !card.app_font_family.is_empty() {
+            text_style.font_family.clone_from(&card.app_font_family);
+        }
+        text_style.text_alignment = TextAlignment::Left;
+        text_style.background = Color::TRANSPARENT;
+        text_style.border_color = Color::TRANSPARENT;
+        text_style.border_width = 0.0;
+        text_style.padding_x = 0.0;
+        text_style.padding_y = 0.0;
+        let small: SharedLabelStyle = text_style.clone().into();
+        text_style.bold = card.title_bold;
+        text_style.text_color = crate::api::style::resolve(
+            card.title_color.as_ref(),
+            palette.appearance,
+            inherited_text,
+        );
+        text_style
+            .font_family
+            .clone_from(if card.title_font_family.is_empty() {
+                &style.font_family
+            } else {
+                &card.title_font_family
+            });
+        text_style.font_size = if card.title_font_size > 0.0 {
+            card.title_font_size
+        } else {
+            (style.font_size * 0.45).max(12.0)
+        };
+        let title_style: SharedLabelStyle = text_style.into();
+
+        let row_height = small.font_size.max(title_style.font_size) * card.line_height;
+        let min_height = (style.font_size * 1.4 + style.padding_y * 2.0)
+            .max(row_height * 2.0 + card.padding_y * 2.0)
+            .max(card.min_height);
+        let background = LabelStyle {
+            font_size: 1.0,
+            ..(*style).clone()
+        }
+        .into();
+        Self {
+            base,
+            number: style,
+            background,
+            app: small,
+            title: title_style,
+            row_height,
+            min_height,
         }
     }
 }

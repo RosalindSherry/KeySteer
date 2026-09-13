@@ -3,6 +3,8 @@
 ## 0.10.5
 
 - Split window maximization and minimization into separate toggles: `F` maximizes/restores, while `Shift+F` minimizes/restores, replacing the three-state cycle. Both shortcuts remain on one help row.
+- Customize window card colors, fonts, borders, and percentage positioning, with an independent Editor position override and automatic collision avoidance.
+- Added visual card editing in the simulator, including drag positioning, live style previews, and configuration export.
 
 ## 0.10.4
 

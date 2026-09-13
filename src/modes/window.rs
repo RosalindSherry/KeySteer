@@ -15,7 +15,6 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use crate::api::style::LabelUi;
 use crate::api::window::{
     WindowAction as W, WindowChange, WindowEditResult, WindowId, WindowInfo, WindowOperation,
     WindowRequest,
@@ -44,7 +43,7 @@ pub struct Settings {
     pub resize_speed: f64,
     pub gap: f64,
     pub border_width: f64,
-    pub ui: LabelUi,
+    pub styles: std::sync::Arc<crate::api::style::WindowStyles>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -334,7 +334,13 @@ fn window_idle_inventory_and_number_input_do_not_allocate() {
         resize_speed: w.resize_speed,
         gap: config.window_editor.gap,
         border_width: w.border_width,
-        ui: w.ui.clone(),
+        styles: crate::api::style::WindowStyles::new(
+            &w.ui,
+            &w.card,
+            &config.palette(Appearance::Light),
+            &config.palette(Appearance::Dark),
+        )
+        .into(),
     });
     mode.session = 1;
     let windows: Vec<_> = (1..=23)

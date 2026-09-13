@@ -138,3 +138,24 @@ Volume changes by 1% per step. Raising application volume does not automatically
 | New shortcuts do not work after upgrading | An explicit `[mode.bindings]` replaces that mode's default table; add new bindings from the latest defaults |
 
 Continue with [Window configuration](/en/reference/configuration#window-configuration), the [action reference](/en/reference/modes-and-actions#window-mode), or [macOS installation and permissions](/en/guide/macos).
+
+
+## Window number card style
+
+Window and A / E / R / T share [window.card]; do not repeat this section under child modes. app_font_size and title_font_size set the two text sizes (0 = automatic). app_font_family and title_font_family set their fonts (empty = inherit the current mode ui.font_family). app_bold and title_bold control bold text.
+
+background_color, border_color, number_color, app_color and title_color set the background, border, number, application name and title colors. Use #RRGGBBAA or a light/dark table, for example app_color = { light = "#19357DFF", dark = "#E8EEFFFF" }. Omitted colors inherit the current mode UI/theme. The default configuration includes commented examples.
+
+text_width sets each text column width (default 260); padding_x / padding_y set text padding (9 / 4); line_height sets the row height multiplier (1.4); min_height sets the minimum card height (44); number_min_width sets the minimum number width (38). Dimensions use logical pixels. Rows follow the larger font size, and text is truncated when space is limited. Number font size, border width and corner radius still use each mode ui.font_size, ui.border_width and ui.border_radius. Internal export and the web editor support these settings.
+
+
+### Card positioning
+
+[window.card] supports position_mode (window / screen) and position. Defaults: position_mode = "window", position = ["50%", "50%", "50%", "50%"]. The four percentage strings are top, right, bottom and left insets. Values must be 0% to 100%, with opposite sides totaling no more than 100%. Four 50% values collapse to the center point.
+
+window anchors each card within its window; Editor has a separate position override, defaulting to top center. screen packs cards into a compact rectangle on the current target display, ordered left to right then top to bottom. Use position = ["0%", "0%", "100%", "0%"] for a full-width top row that wraps when necessary. Switching displays recomputes geometry using the new display work area and DPI.
+
+Positions are preferences: existing collision avoidance still moves cards away from region numbers, other cards and the help panel. Cards may leave the preferred range when space is limited. All window modes share this configuration; percentages are parsed when configuration loads.
+
+
+Editor overrides position only: set position and optionally position_mode in [window_editor.card]. Colors, fonts and sizes still inherit [window.card]. Editor defaults to window positioning at top center, with position = ["0%", "50%", "100%", "50%"]. Changing the base Window position does not change this default. Quick, Restore and Tabs retain their original positioning. The simulator edits each mode position separately while retaining shared style controls.

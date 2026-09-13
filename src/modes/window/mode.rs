@@ -188,6 +188,16 @@ impl Mode for WindowMode {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .indicator_detail()
     }
+    fn cursor_indicator_detail(&self) -> Option<String> {
+        if self.kind != WindowKind::Move {
+            return None;
+        }
+        let session = self
+            .session
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Some(if session.size { "Resize" } else { "Move" }.into())
+    }
     fn help_anchor(&self) -> Option<Rect> {
         self.session
             .lock()

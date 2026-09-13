@@ -103,6 +103,110 @@ pub(super) fn logical(rect: Rect, scale: f64) -> Rect {
     )
 }
 
+/// Insets describe a preferred region, including a collapsed line or point.
+pub(super) fn card_region(area: Rect, [top, right, bottom, left]: [f64; 4]) -> Rect {
+    Rect::new(
+        area.x + area.width * left,
+        area.y + area.height * top,
+        area.width * (1.0 - left - right).max(0.0),
+        area.height * (1.0 - top - bottom).max(0.0),
+    )
+}
+
+#[cfg(test)]
+#[test]
+fn screen_cards_wrap_and_recompute_for_each_monitor() {
+    for area in [
+        Rect::new(0.0, 0.0, 1000.0, 700.0),
+        Rect::new(-1600.0, 40.0, 1500.0, 900.0),
+    ] {
+        assert_eq!(card_region(area, [0.5; 4]).center(), area.center());
+        let (_, positions) =
+            screen_card_positions(10, 300.0, 80.0, area, [0.0, 0.0, 1.0, 0.0], 6.0);
+        let columns = ((area.width + 6.0) / 306.0).floor() as usize;
+        assert_eq!(positions[0].x, area.x);
+        assert_eq!(positions[0].y, area.y);
+        assert_eq!(positions[columns].x, area.x);
+        assert!(positions[columns].y > positions[0].bottom());
+        for (i, rect) in positions.iter().enumerate() {
+            assert!(rect.x >= area.x && rect.right() <= area.right());
+            assert!(rect.y >= area.y && rect.bottom() <= area.bottom());
+            assert!(
+                positions[..i]
+                    .iter()
+                    .all(|other| other.intersect(rect).is_none())
+            );
+        }
+        let (_, centered) = screen_card_positions(6, 200.0, 80.0, area, [0.5; 4], 6.0);
+        let bounds = centered.iter().copied().reduce(|a, b| a.union(&b)).unwrap();
+        assert_eq!(bounds.center(), area.center());
+    }
+}
+
+/// Row-major packing around a point, or across a configured horizontal range.
+/// This only chooses preferred anchors; the normal collision pass still runs.
+pub(super) fn screen_card_positions(
+    count: usize,
+    width: f64,
+    height: f64,
+    area: Rect,
+    insets: [f64; 4],
+    gap: f64,
+) -> (f64, Vec<Rect>) {
+    if count == 0 {
+        return (width.min(area.width), Vec::new());
+    }
+    let region = card_region(area, insets);
+    let rows_available = ((area.height + gap) / (height + gap)).floor().max(1.0) as usize;
+    let minimum_columns = count.div_ceil(rows_available);
+    let width = width
+        .min(((area.width - gap * (minimum_columns - 1) as f64) / minimum_columns as f64).max(1.0));
+    let capacity = ((area.width + gap) / (width + gap)).floor().max(1.0) as usize;
+    let columns = if region.width > 0.001 {
+        (((region.width + gap) / (width + gap)).floor().max(1.0) as usize)
+            .min(count)
+            .max(minimum_columns)
+    } else {
+        // Minimize perimeter to keep the occupied rectangle compact around a point.
+        (minimum_columns..=capacity.min(count).max(minimum_columns))
+            .min_by(|a, b| {
+                let cost = |cols: usize| {
+                    cols as f64 * (width + gap) + count.div_ceil(cols) as f64 * (height + gap)
+                };
+                cost(*a).total_cmp(&cost(*b))
+            })
+            .unwrap_or(1)
+    };
+    let rows = count.div_ceil(columns);
+    let total_width = columns as f64 * (width + gap) - gap;
+    let total_height = rows as f64 * (height + gap) - gap;
+    let x = if region.width > 0.001 {
+        region.x
+    } else {
+        region.x - total_width / 2.0
+    };
+    let y = if region.height > 0.001 {
+        region.y + (region.height - total_height) / 2.0
+    } else {
+        region.y - total_height / 2.0
+    };
+    let x = x.clamp(area.x, (area.right() - total_width).max(area.x));
+    let y = y.clamp(area.y, (area.bottom() - total_height).max(area.y));
+    (
+        width,
+        (0..count)
+            .map(|i| {
+                Rect::new(
+                    x + (i % columns) as f64 * (width + gap),
+                    y + (i / columns) as f64 * (height + gap),
+                    width,
+                    height,
+                )
+            })
+            .collect(),
+    )
+}
+
 struct Annotation {
     group: u32,
     primary: usize,

@@ -90,9 +90,10 @@ pub struct RecursiveGridView<'a> {
 
 #[derive(Clone, Copy)]
 pub struct WindowView<'a> {
+    pub configurable_position: bool,
     pub tabs: &'a super::window_tabs::TabState,
     pub group_input: bool,
-    pub ui: &'a LabelUi,
+    pub styles: &'a super::style::WindowStyles,
     pub border_width: f64,
     pub target: Option<&'a WindowInfo>,
     pub screen: usize,

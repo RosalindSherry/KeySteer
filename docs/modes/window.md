@@ -138,3 +138,24 @@ Windows 上退出模式后还可以拖动标签排序、拖到另一组转移窗
 | 升级后新快捷键没有反应 | 显式 `[模式.bindings]` 会替换该模式默认表；对照最新默认配置补入新绑定 |
 
 继续阅读：[窗口配置](/reference/configuration#window-配置) · [模式与动作参考](/reference/modes-and-actions#window-模式) · [macOS 安装与授权](/guide/macos)。
+
+
+## 窗口编号卡片样式
+
+Window 和 A / E / R / T 共用 [window.card]，子模式不重复配置。app_font_size、title_font_size 控制两行字号（0 自动）；app_font_family、title_font_family 控制字体（空值继承当前模式 ui.font_family）；app_bold、title_bold 控制加粗。
+
+background_color、border_color、number_color、app_color、title_color 分别设置背景、边框、编号、程序名和标题颜色。颜色支持 #RRGGBBAA 或浅色／深色表，例如 app_color = { light = "#19357DFF", dark = "#E8EEFFFF" }。省略颜色时继承当前模式 ui／主题，默认配置文件提供可取消注释的示例。
+
+text_width 是每列文字宽度（默认 260），padding_x / padding_y 是文字内边距（9 / 4），line_height 是行高倍数（1.4），min_height 是卡片最小高度（44），number_min_width 是编号最小宽度（38）。尺寸使用逻辑像素；行高按两行较大字号计算，空间不足时省略文字。编号字号、边框宽度和圆角继续使用各模式 ui.font_size、ui.border_width、ui.border_radius。内部导出和网页编辑器同步支持这些配置。
+
+
+### 卡片定位
+
+[window.card] 新增 position_mode（window / screen）和 position。默认 position_mode = "window"，position = ["50%", "50%", "50%", "50%"]。四项依次为上、右、下、左边距，只接受 0% 至 100% 的百分比字符串；相对的两项之和不能超过 100%。四个 50% 收敛到中心点。
+
+基础 Window 按窗口计算首选中心；Editor 使用独立的位置覆盖，默认顶部居中。screen 按当前目标屏幕的可用区域集中排放卡片；中心点布局组成紧凑矩形，逐行从左到右排列。position = ["0%", "0%", "100%", "0%"] 表示屏幕顶部整条横向范围，尽量横向排满后换行。切换屏幕后按新屏幕的工作区和 DPI 重新计算。
+
+这些是首选位置：卡片仍避让区域编号、其他卡片和帮助面板。边缘会限制在屏幕可用区，拥挤时允许移出首选范围，以保证编号可见。所有窗口子模式共用这一份配置，百分比在加载配置时解析。
+
+
+Editor 仅覆盖位置：在 [window_editor.card] 设置 position 和可选的 position_mode，颜色、字体及尺寸继续继承 [window.card]。默认 position_mode = "window"，position = ["0%", "50%", "100%", "50%"]，即顶部居中。基础 Window 的位置变更不影响此默认值。Quick、Restore、Tabs 保留原来的定位行为。模拟器在 Window／Editor 中分别编辑对应 position；其他样式仍编辑共享配置。

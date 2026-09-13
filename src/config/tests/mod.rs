@@ -5,6 +5,58 @@ use crate::api::binding::{Button, Direction, ScrollAmount, Speed};
 use crate::api::{ButtonAction, ModeId, MouseButton, VisionOptions};
 
 #[test]
+fn editor_card_only_overrides_position() {
+    let config = Config::parse("[window.card]\napp_font_size = 24\n[window_editor.card]\nposition = ['20%', '50%', '80%', '50%']").unwrap();
+    config.validate().unwrap();
+    let editor = config.window_editor.card.apply(&config.window.card);
+    assert_eq!(editor.app_font_size, 24.0);
+    assert_eq!(editor.position, ["20%", "50%", "80%", "50%"]);
+    assert_eq!(config.window.card.position, ["50%", "50%", "50%", "50%"]);
+    let restored = Config::parse(&config.to_toml().unwrap()).unwrap();
+    assert_eq!(restored.window_editor.card, config.window_editor.card);
+}
+
+#[test]
+fn window_card_style_is_shared_validated_and_exported() {
+    for mode in ["window"] {
+        let config = Config::parse(&format!(
+            r##"[{mode}.card]
+app_font_size = 22.0
+title_font_size = 30.0
+app_font_family = "Example Sans"
+title_bold = true
+app_color = {{ light = "#123456FF", dark = "#FEDCBAFF" }}
+text_width = 320.0
+padding_y = 8.0
+"##
+        ))
+        .unwrap();
+        config.validate().unwrap();
+        let reparsed = Config::parse(&config.to_toml().unwrap()).unwrap();
+        assert_eq!(config.window.card, reparsed.window.card);
+        for mode in [
+            "window_quick",
+            "window_editor",
+            "window_restore",
+            "window_tab",
+        ] {
+            assert!(Config::parse(&format!("[{mode}.card]\ntext_width = 300")).is_err());
+        }
+        for invalid in [
+            "text_width = 0",
+            "line_height = 0.5",
+            "padding_y = -1",
+            "app_font_size = nan",
+            "title_font_size = 257",
+            "title_color = 'invalid'",
+        ] {
+            let invalid = Config::parse(&format!("[{mode}.card]\n{invalid}")).unwrap();
+            assert!(invalid.validate().is_err());
+        }
+    }
+}
+
+#[test]
 fn window_split_ratios_validate_and_round_trip() {
     let config =
         Config::parse("[window_quick]\nsplit_ratios = [\"1/5\", \"2/5\", \"3/5\", \"4/5\"]")

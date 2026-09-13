@@ -2,6 +2,36 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { reactive } from 'vue'
 
+test('window card defaults and custom styles survive browser export', async () => {
+  const { readFileSync } = await import('node:fs')
+  const { stringify } = await import('smol-toml')
+  const defaults = parseConfigDocument(readFileSync(new URL('../../../keysteer.default.toml', import.meta.url), 'utf8')).document
+  for (const mode of ['window']) {
+    assert.equal(defaults[mode].card.text_width, 260)
+    const uploaded = parseConfigDocument(`[${mode}.card]\ntitle_font_size = 30\napp_color = {light = "#123456FF", dark = "#FEDCBAFF"}`).document
+    const effective = resolveConfigDocument(defaults, uploaded)
+    assert.equal(effective[mode].card.app_font_size, 0)
+    assert.equal(effective[mode].card.title_font_size, 30)
+    assert.deepEqual(parseConfigDocument(stringify(effective)).document, effective)
+    for (const child of ['window_quick', 'window_editor', 'window_restore', 'window_tab']) {
+      if (child === 'window_editor') assert.deepEqual(effective[child].card.position, ['0%', '50%', '100%', '50%'])
+      else assert.equal(effective[child].card, undefined)
+      assert.throws(() => parseConfigDocument(`[${child}.card]\ntext_width = 300`), /window.card/)
+    }
+    for (const invalid of ['text_width = 0', 'line_height = 0.5', 'app_font_size = nan', 'title_color = "bad"']) {
+      assert.throws(() => parseConfigDocument(`[${mode}.card]\n${invalid}`), /card/)
+    }
+  }
+})
+
+test('Editor position overrides without duplicating shared card styling', async () => {
+  const { stringify } = await import('smol-toml')
+  const document = parseConfigDocument('[window.card]\napp_font_size = 24\n[window_editor.card]\nposition = ["20%", "50%", "80%", "50%"]').document
+  assert.equal(document.window.card.app_font_size, 24)
+  assert.equal(document.window_editor.card.app_font_size, undefined)
+  assert.deepEqual(parseConfigDocument(stringify(document)).document, document)
+})
+
 test('fraction ratios preserve source strings and reject invalid configurations', () => {
   const parsed = parseConfigDocument('[window_quick]\nsplit_ratios = ["1/5", " 2 / 5 ", "4/5"]')
   assert.deepEqual(parsed.document.window_quick.split_ratios, ['1/5', ' 2 / 5 ', '4/5'])
