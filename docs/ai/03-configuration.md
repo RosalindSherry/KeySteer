@@ -248,3 +248,11 @@ Window/Quick/Editor 默认 Shift+V+M=`window_system_volume_mute`，切换系统�
 
 
 内部 Config::to_toml 与网页 ConfigStudio 同步导出完整有效绑定，系统静音动作出现在可编辑动作列表。网页默认值由 docs:sync 从 keysteer.default.toml 生成；自定义绑定表继续整体替换默认表，不在导出时补回用户删除的快捷键。
+
+
+Window-family help uses key_help.window_key_help (default true), independently
+of ordinary key_help.enabled. All five default binding tables include ? = key_help.
+Engine stores an optional window-only visibility override, preserving it across
+submodes and resetting it on fresh entry. The panel toggle does not hide window
+borders/numbers. Explicit binding tables still replace defaults. Serde export and
+ConfigStudio preserve the option; the simulator mirrors defaults and overrides.

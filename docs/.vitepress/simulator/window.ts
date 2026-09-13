@@ -115,6 +115,7 @@ export function setDemoWindowCount(state: SimulatorState, count: number): void {
 export function enterWindow(state: SimulatorState, settings: Record<string, any> = {}): void {
   const w = state.window
   if (isWindowMode(state.mode)) return
+  state.windowHelpOverride = null
   w.previous = state.mode
   w.screens = settings.screens === 'all' ? 'all' : 'current'; w.includeMinimized = settings.include_minimized === true
   w.size = false; w.temporary = false; w.history = []; w.redo = []; w.editRedo = []; w.initial = snapshot(w); w.changedWindows = []; w.gesture = false

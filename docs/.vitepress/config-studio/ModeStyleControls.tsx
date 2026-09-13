@@ -58,7 +58,8 @@ const fields = {
       { path: 'key_help.border_color', label: '边框色', kind: 'color' },
     ],
     layout: [
-      { path: 'key_help.enabled', label: '启用按键提示', kind: 'boolean' },
+  { path: 'key_help.enabled', label: '启用按键提示', kind: 'boolean' },
+  { path: 'key_help.window_key_help', label: '窗口模式默认显示提示（? 可切换）', kind: 'boolean' },
       { path: 'key_help.font_size', label: '字号', kind: 'number', min: 1, max: 72, step: 1 },
       { path: 'key_help.padding_x', label: '水平内边距', kind: 'number', min: 0, max: 100, step: 1 },
       { path: 'key_help.padding_y', label: '垂直内边距', kind: 'number', min: 0, max: 100, step: 1 },

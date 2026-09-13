@@ -36,8 +36,20 @@ impl KeyHelpCache {
 }
 
 impl Engine {
-    fn window_help_visible(&self) -> bool {
+    pub(super) fn window_help_visible(&self) -> bool {
         self.display_mode().is_window()
+            && self
+                .overlay
+                .window_help_override
+                .unwrap_or(self.settings.key_help.window_key_help)
+    }
+
+    fn help_visible(&self) -> bool {
+        if self.display_mode().is_window() {
+            self.window_help_visible()
+        } else {
+            self.overlay.key_help_visible
+        }
     }
 
     pub(super) fn help_screen(&self) -> Option<&Screen> {
@@ -185,7 +197,7 @@ impl Engine {
     }
 
     pub(super) fn decorate_key_help(&mut self, scene: &mut OverlayScene) {
-        if (!self.overlay.key_help_visible && !self.window_help_visible())
+        if !self.help_visible()
             || self.registry.active == ModeId::idle()
             || self.window_presets.pending.is_some()
         {
@@ -271,9 +283,7 @@ impl Engine {
 
     fn build_key_help(&self, scene: &mut OverlayScene) {
         let window_help = self.window_help_visible();
-        if (!self.overlay.key_help_visible && !window_help)
-            || self.registry.active == ModeId::idle()
-        {
+        if !self.help_visible() || self.registry.active == ModeId::idle() {
             return;
         }
         let Some(screen) = self.help_screen() else {

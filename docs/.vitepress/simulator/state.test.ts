@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { switchWindowMode } from './window.ts'
 import {
   applyModeAction,
   applyKeyHelpAction,
@@ -14,6 +15,26 @@ test('pointer movement is clamped to the simulated screen', () => {
   movePointer(state, 'move_left', 80)
   movePointer(state, 'move_down', 70)
   assert.deepEqual(state.pointer, { x: 0, y: 100 })
+})
+
+test('window help default can be overridden independently and resets on reentry', () => {
+  for (const initial of [false, true]) {
+    const state = createSimulatorState()
+    switchWindowMode(state, 'window')
+    assert.equal(state.windowHelpOverride ?? initial, initial)
+    applyKeyHelpAction(state, 'key_help', false, initial)
+    assert.equal(state.windowHelpOverride, !initial)
+    for (const mode of ['window_quick', 'window_editor', 'window_restore', 'window_tab'] as const) {
+      switchWindowMode(state, mode)
+      assert.equal(state.windowHelpOverride, !initial)
+    }
+    applyKeyHelpAction(state, 'key_help', false, initial)
+    assert.equal(state.windowHelpOverride, initial)
+    applyModeAction(state, 'normal')
+    switchWindowMode(state, 'window')
+    assert.equal(state.windowHelpOverride, null)
+    assert.equal(state.keyHelpVisible, false)
+  }
 })
 
 test('mode changes reserve independent grid paths', () => {

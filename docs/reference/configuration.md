@@ -452,7 +452,16 @@ timers = true
 
 `key_help` 动词切换按键提示面板。在 `[normal.bindings]` 中写入 `"?" = "key_help"` 即可启用；省略或注释该项即禁用，不需要 `none`。`?` 按字面匹配操作系统产生的问号字符，解析器不推测键盘布局或按法；targeting 模式按原有规则继承。进入 Idle 自动关闭。
 
-`[key_help]` 只提供常用样式项：`enabled`、`font_family`、`font_size`、`background_color`、`text_color`、`border_color`、`border_width`、`border_radius`、`padding_x`、`padding_y`。空字体和未指定的背景/文字色跟随模式指示器与主题。颜色支持 `#RRGGBBAA` 或 `{ light = "#RRGGBBAA", dark = "#RRGGBBAA" }`。标题大小、分列和居中自动适配。
+Window 和 A/E/R/T 子模式的下方面板默认开启，可独立设置初始显示状态：
+
+```toml
+[key_help]
+window_key_help = false
+```
+
+这些模式默认绑定 `"?" = "key_help"`，默认关闭后仍可按 `?` 显示或隐藏。手动切换状态在窗口子模式之间保持，退出后重新进入恢复配置默认值。此设置不隐藏窗口边框或编号，也不受普通提示开关 `enabled` 限制。已有自定义窗口绑定表需自行补入 `"?" = "key_help"`。
+
+`[key_help]` 还支持 `enabled`、`font_family`、`font_size`、`background_color`、`text_color`、`border_color`、`border_width`、`border_radius`、`padding_x`、`padding_y`。空字体和未指定的背景/文字色跟随模式指示器与主题。颜色支持 `#RRGGBBAA` 或 `{ light = "#RRGGBBAA", dark = "#RRGGBBAA" }`。标题大小、分列和居中自动适配。
 
 在[模拟器](/simulator)点击“编辑按键提示样式”，即可修改、预览并导出 TOML。
 

@@ -124,6 +124,7 @@ window_config!(WindowTab {});
 
 fn common(back: ModeId, actions: &[(&str, W)], modes: &[(&str, ModeId)]) -> WindowModeConfig {
     let mut common = WindowModeConfig::default();
+    common.bindings.insert("?".into(), Binding::KeyHelp);
     common.bindings.extend(
         actions
             .iter()

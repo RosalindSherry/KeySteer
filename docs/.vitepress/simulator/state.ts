@@ -1,4 +1,4 @@
-import { createWindowState, leaveWindow, type WindowState, type WindowMode } from './window.ts'
+import { createWindowState, leaveWindow, isWindowMode, type WindowState, type WindowMode } from './window.ts'
 
 export type SimulatorMode = 'idle' | 'normal' | 'grid' | 'recursive_grid' | 'ui_hint' | WindowMode
 
@@ -22,6 +22,7 @@ export interface SimulatorState {
   window: WindowState
   mode: SimulatorMode
   keyHelpVisible: boolean
+  windowHelpOverride: boolean | null
   pointer: Point
   pressedButtons: Set<'left' | 'right' | 'middle'>
   targeting: TargetingState
@@ -40,6 +41,7 @@ export function createSimulatorState(): SimulatorState {
     window: createWindowState(),
     mode: 'normal',
     keyHelpVisible: false,
+    windowHelpOverride: null,
     pointer: { x: 50, y: 50 },
     pressedButtons: new Set(),
     targeting: {
@@ -91,10 +93,14 @@ function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value))
 }
 
-export function applyKeyHelpAction(state: SimulatorState, action: string, enabled = true): boolean {
+export function applyKeyHelpAction(state: SimulatorState, action: string, enabled = true, windowDefaultVisible = true): boolean {
   if (action !== 'key_help') return false
   if (state.mode !== 'idle') {
-    state.keyHelpVisible = enabled && !state.keyHelpVisible
+    if (isWindowMode(state.mode) && !state.window.temporary) {
+      state.windowHelpOverride = !(state.windowHelpOverride ?? windowDefaultVisible)
+    } else {
+      state.keyHelpVisible = enabled && !state.keyHelpVisible
+    }
   }
   state.lastEvent = action
   return true

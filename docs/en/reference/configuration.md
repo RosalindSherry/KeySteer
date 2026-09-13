@@ -393,6 +393,15 @@ The `key_help` verb toggles the available-key panel. Add `"?" = "key_help"` unde
 
 `[key_help]` supports `enabled`, `font_family`, `font_size`, `background_color`, `text_color`, `border_color`, `border_width`, `border_radius`, `padding_x`, and `padding_y`. Empty font and omitted background/text colors follow the mode indicator and theme. Colors accept `#RRGGBBAA` or `{ light = "#RRGGBBAA", dark = "#RRGGBBAA" }`. Title sizing, columns and centering adapt automatically.
 
+Window and its A/E/R/T submodes show the lower help panel by default. To start with it hidden:
+
+```toml
+[key_help]
+window_key_help = false
+```
+
+These modes bind `"?" = "key_help"` by default, so `?` can still show or hide the panel. The manual choice persists between window submodes; leaving and reentering restores the configured default. Window borders and numbers remain visible. This setting is independent of ordinary help's `enabled` switch. Existing custom window binding tables must add `"?" = "key_help"` explicitly.
+
 Use **Edit key help style** in the [simulator](/en/simulator) to preview changes and export TOML.
 
 ### Mouse side buttons

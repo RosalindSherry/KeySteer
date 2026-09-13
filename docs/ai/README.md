@@ -103,3 +103,9 @@ macOS 自动原生验收应用、辅助功能申请和日志入口见 [构建与
 macOS 平台按键展示名、重叠窗口完整枚举和静默应用音频偏好见 [渲染](07-rendering-and-performance.md)、[原生后端](06-platform-backends.md) 和 [验证](08-build-docs-and-tests.md)。
 
 macOS Tabs 无定时器的 AX／鼠标松开跟随、worker 与 AppKit 的 CFRunLoop 唤醒源及原生性能基准见 [原生后端](06-platform-backends.md)、[渲染性能](07-rendering-and-performance.md) 与 [测试](08-build-docs-and-tests.md)。
+
+
+窗口子模式提示面板的默认开关及 ? 临时切换见 [配置](03-configuration.md)。
+
+
+Window / AERT 鼠标下模式指示器与独立面板显示见 [性能与覆盖层](07-rendering-and-performance.md)。

@@ -429,7 +429,7 @@ export default defineComponent({
         catch (error) { layoutStorageError.value = formatError(error); simulator.lastEvent = layoutStorageError.value; return }
       }
       if (applyWindowAction(simulator, action, effectiveDocument.value?.[isWindowMode(action) ? action : simulator.mode] ?? {}, Date.now(), continuous ? .016 : undefined)) { persistLayoutLibrary(); return }
-      if (applyKeyHelpAction(simulator, action, effectiveDocument.value?.key_help?.enabled !== false)) return
+      if (applyKeyHelpAction(simulator, action, effectiveDocument.value?.key_help?.enabled !== false, effectiveDocument.value?.key_help?.window_key_help !== false)) return
       if (MOVEMENT_ACTIONS.has(action)) {
         movePointer(simulator, action, continuous ? 0.45 : 2.5)
         return
@@ -800,7 +800,7 @@ export default defineComponent({
                   <span key={clickPulse.value} class={clickPulse.value ? 'pulse' : ''} />
                 </div>
                 {scrollPulse.value && <div class="ks-scroll-pulse">{scrollPulse.value}</div>}
-                {effectiveDocument.value && isWindowMode(simulator.mode) && !simulator.window.temporary && !simulator.window.noteOpen && (
+                {effectiveDocument.value && isWindowMode(simulator.mode) && (simulator.windowHelpOverride ?? effectiveDocument.value.key_help?.window_key_help !== false) && !simulator.window.temporary && !simulator.window.noteOpen && (
                   <KeyHelpPreview isMac={isMac.value} document={effectiveDocument.value} mode={simulator.mode} appearance={appearance.value}
                     anchor={simulator.window.library ? undefined : windowTarget(simulator.window)} detail={windowDetail(simulator.window)}
                     onRestore={(id: number) => { restoreWindowPreset(simulator, id, targetingSettings.value); persistLayoutLibrary() }}

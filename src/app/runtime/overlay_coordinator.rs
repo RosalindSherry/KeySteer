@@ -93,6 +93,7 @@ pub(super) struct DynamicOverlayState {
 #[derive(Default)]
 pub(super) struct OverlayCoordinator {
     pub(super) key_help_visible: bool,
+    pub(super) window_help_override: Option<bool>,
     pub(super) window_help_plan: Option<super::key_help::WindowKeyHelpPlan>,
     pub(super) key_help_cache: Option<Box<super::key_help::KeyHelpCache>>,
     pub(super) last_scene: Option<Arc<OverlayScene>>,
@@ -118,6 +119,7 @@ impl OverlayCoordinator {
         self.pending = None;
         self.speed_toggle = None;
         self.key_help_visible = false;
+        self.window_help_override = None;
         self.key_help_cache = None;
         self.window_help_plan = None;
     }
@@ -192,7 +194,6 @@ impl Engine {
             ));
         }
         if scene.indicator.is_none()
-            && !display_mode.is_window()
             && let Some((indicator, geometry)) = self.build_indicator(&display_mode)
         {
             scene.indicator = Some(indicator);
@@ -408,16 +409,26 @@ impl Engine {
         display_mode: &ModeId,
     ) -> Option<(Indicator, IndicatorGeometry)> {
         let mode = self.registry.get(display_mode)?;
-        let (text, ui) = self
-            .settings
-            .mode_indicator
-            .for_mode_with(display_mode.as_str(), || mode.display_name())?;
+        let (text, ui) = self.settings.mode_indicator.for_mode_with(
+            display_mode.as_str(),
+            || match display_mode.as_str() {
+                "window" => "Window".into(),
+                "window_quick" => "Quick".into(),
+                "window_editor" => "Edit".into(),
+                "window_restore" => "Restore".into(),
+                "window_tab" => "Tabs".into(),
+                _ => mode.display_name(),
+            },
+        )?;
 
         let background = mode
             .indicator_color(&self.palette)
             .unwrap_or_else(|| self.palette.surface_label());
-        let held_text = mode
-            .indicator_detail()
+        // Window detail belongs to the bottom panel; the cursor badge stays
+        // compact and uses the existing native position-only follow path.
+        let held_text = (!display_mode.is_window())
+            .then(|| mode.indicator_detail())
+            .flatten()
             .map(|value| HeldTargetsText {
                 character_count: value.chars().count(),
                 value,

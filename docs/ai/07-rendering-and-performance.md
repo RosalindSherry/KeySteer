@@ -360,3 +360,10 @@ macOS 持久标签栏与 Windows 同样提供最小可读标签宽度、局部�
 ## macOS 标签栏拖动快路径
 
 跟随由 AXMoved／AXResized 与现有鼠标松开事件驱动，不使用定时更新或固定帧率。worker 与 AppKit 各自通过持久的可唤醒 CFRunLoop source 收取事件；位置更新合并为每组最新状态。纯位移复用窗口、控件和标签内容，仅设置 panel 几何；只有 owner、可见性或结构发布变化才重新排序窗口层级，标题/成员变化仍更新内容。拖动期间不通过 set_frame 修改外部应用窗口，结束事件才进行必要的头部留白校正。
+
+
+Window-family modes also use the shared cursor mode indicator (Window, Quick,
+Edit, Restore, Tabs). It follows the existing native position-only update path
+on Windows and macOS, without a new timer. Window detail stays in the bottom
+help panel, not in the cursor badge. mode_indicator controls this indicator
+independently of key_help.window_key_help. Configured mode text/styles still win.

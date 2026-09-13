@@ -1,4 +1,60 @@
 #[test]
+fn window_cursor_indicators_are_compact_and_independent_of_help_panel() {
+    let mut config = Config::default();
+    config.key_help.window_key_help = false;
+    let (mut engine, mut backend, log) = window_test_engine(&config);
+    enter_window(&mut engine, &mut backend, &log);
+    for (mode, text) in [(ModeId::window(), "Window"), (ModeId::window_quick(), "Quick"),
+        (ModeId::window_editor(), "Edit"), (ModeId::window_restore(), "Restore"),
+        (ModeId::window_tab(), "Tabs")] {
+        engine.set_active(mode.clone());
+        let (indicator, geometry) = engine.build_indicator(&mode).unwrap();
+        assert_eq!(indicator.text, text);
+        assert!(indicator.held_text.is_none());
+        assert!(!engine.window_help_visible());
+        assert_ne!(geometry.position(Point::new(100.0, 100.0), &engine.screens),
+            geometry.position(Point::new(200.0, 200.0), &engine.screens));
+    }
+    engine.settings.mode_indicator.modes.entry("window".into()).or_default().enabled = Some(false);
+    assert!(engine.build_indicator(&ModeId::window()).is_none());
+}
+
+#[test]
+fn window_help_default_and_toggle_are_independent_of_normal_help() {
+    for visible in [false, true] {
+        let mut config = Config::default();
+        config.key_help.enabled = false;
+        config.key_help.window_key_help = visible;
+        let exported = config.to_toml().unwrap();
+        let config = Config::parse(&exported).unwrap();
+        assert_eq!(config.key_help.window_key_help, visible);
+        for bindings in [&config.window.bindings, &config.window_quick.bindings,
+            &config.window_editor.bindings, &config.window_restore.bindings, &config.window_tab.bindings] {
+            assert_eq!(bindings.get("?"), Some(&Binding::KeyHelp));
+        }
+        let (mut engine, mut backend, log) = window_test_engine(&config);
+        enter_window(&mut engine, &mut backend, &log);
+        assert_eq!(engine.window_help_visible(), visible);
+        assert_eq!(log.lock().unwrap().scenes.last().unwrap().labels.iter()
+            .any(|label| label.text == "Maximize / minimize / restore"), visible);
+        for event in [key_down("?"), key_up("?")] {
+            engine.handle_backend_event(event, &mut backend).unwrap();
+        }
+        assert_eq!(engine.window_help_visible(), !visible);
+        assert_eq!(log.lock().unwrap().scenes.last().unwrap().labels.iter()
+            .any(|label| label.text == "Maximize / minimize / restore"), !visible);
+        assert!(!engine.overlay.key_help_visible);
+        for mode in [ModeId::window_quick(), ModeId::window_editor(), ModeId::window_restore(), ModeId::window_tab()] {
+            engine.set_active(mode);
+            assert_eq!(engine.window_help_visible(), !visible);
+        }
+        engine.set_active(ModeId::idle());
+        engine.set_active(ModeId::window());
+        assert_eq!(engine.window_help_visible(), visible);
+    }
+}
+
+#[test]
 fn window_number_and_configurable_cycle_keys_include_group_members_only_in_window_mode() {
     use crate::api::window::{WindowAction as W, WindowOperation as O, WindowInfo, WindowId, WindowResult};
     use crate::api::window_tabs::{TabState, TabGroup, TabGroupId};
@@ -511,7 +567,8 @@ fn window_help_follows_target_not_pointer_and_contains_quick_layout_in_one_panel
     let panel = |scene: &OverlayScene| scene.labels.iter().find(|l| l.text.is_empty()
         && l.z_index == i32::MAX - 1).expect("one rounded help background").rect;
     let initial = log.lock().unwrap().scenes.last().unwrap().clone();
-    assert!(initial.indicator.is_none());
+    assert_eq!(initial.indicator.as_ref().unwrap().text, "Window");
+    assert!(initial.indicator.as_ref().unwrap().held_text.is_none());
     let bounds = panel(&initial);
     let work = engine.screens[0].work_area;
     assert!(bounds.x >= work.x && bounds.y >= work.y && bounds.right() <= work.right() && bounds.bottom() <= work.bottom());

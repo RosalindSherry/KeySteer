@@ -302,6 +302,9 @@ impl Engine {
 
     pub(super) fn set_active(&mut self, active: ModeId) {
         self.overlay.window_help_plan = None;
+        if active.is_window() && !self.registry.active.is_window() {
+            self.overlay.window_help_override = None;
+        }
         if active != self.registry.active {
             // Activation keys belong to the outgoing input context. A fresh
             // physical press arms the destination's temporary layer.

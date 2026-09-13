@@ -931,21 +931,21 @@ fn literal_character_held_action_releases_by_physical_key() {
 #[test]
 fn character_capture_policy_tracks_startup_and_reload_removal() {
     let mut config = Config::default();
-    config.normal.bindings.insert("?".into(), Binding::parse("key_help").unwrap());
+    config.normal.bindings.insert(":".into(), Binding::parse("key_help").unwrap());
     config.normal.bindings.insert("ctrl+@".into(), Binding::parse("key_help").unwrap());
     let mut engine = Engine::from_plan(crate::app::configuration::compile(&config).unwrap(), Appearance::Dark).unwrap();
     let (mut backend, log) = FakeBackend::new(Vec::new());
     engine.run(&mut backend).unwrap();
-    assert!(engine.registry.character_keys.contains_key(&'?'));
+    assert!(engine.registry.character_keys.contains_key(&':'));
     assert!(!engine.registry.character_keys.contains_key(&'@'), "a modified chord is not a literal character binding");
     let captured = log.lock().unwrap().character_bindings[0].clone();
-    assert!(captured.contains(&"?".to_string()));
+    assert!(captured.contains(&":".to_string()));
     assert!(!captured.contains(&"@".to_string()));
 
-    config.normal.bindings.remove("?");
+    config.normal.bindings.remove(":");
     engine.apply_runtime_plan(crate::app::configuration::compile(&config).unwrap(), &mut backend).unwrap();
-    assert!(!engine.registry.character_keys.contains_key(&'?'));
-    assert!(!log.lock().unwrap().character_bindings.last().unwrap().contains(&"?".to_string()));
+    assert!(!engine.registry.character_keys.contains_key(&':'));
+    assert!(!log.lock().unwrap().character_bindings.last().unwrap().contains(&":".to_string()));
 }
 
 #[test]
@@ -953,7 +953,7 @@ fn character_capture_policy_tracks_effective_app_overrides_only() {
     let mut config = Config::default();
     config.normal.app_configs.push(crate::config::AppOverride {
         bundle_id: "com.example.editor".into(),
-        bindings: Bindings::from([("?".into(), Binding::parse("key_help").unwrap())]),
+        bindings: Bindings::from([(":".into(), Binding::parse("key_help").unwrap())]),
     });
     let app = |title: &str| BackendEvent::FocusChanged(Some(FocusedApp {
         bundle_id: "com.example.editor".into(), window_title: title.into(), process_id: 7,
@@ -963,9 +963,9 @@ fn character_capture_policy_tracks_effective_app_overrides_only() {
     engine.run(&mut backend).unwrap();
     let policies = &log.lock().unwrap().character_bindings;
     assert_eq!(policies.len(), 3, "initial, matching override, and override removal; title-only changes reuse the policy");
-    assert!(!policies[0].contains(&"?".to_string()));
-    assert!(policies[1].contains(&"?".to_string()));
-    assert!(!policies[2].contains(&"?".to_string()));
+    assert!(!policies[0].contains(&":".to_string()));
+    assert!(policies[1].contains(&":".to_string()));
+    assert!(!policies[2].contains(&":".to_string()));
 }
 
 #[test]
