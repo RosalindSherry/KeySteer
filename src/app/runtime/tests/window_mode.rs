@@ -1090,7 +1090,7 @@ fn restore_help_and_input_share_arbitrary_configured_aliases() {
         for event in [key_down("r"), key_up("r")] { engine.handle_backend_event(event, &mut backend).unwrap(); }
         let labels = log.lock().unwrap().scenes.last().unwrap().labels.clone();
         for key in [exit, launcher] {
-            let expected = format!("{modifier}+{key}").replace('_', " ").to_uppercase();
+            let expected = crate::api::input::display_key_chord(&format!("{modifier}+{key}"));
             assert!(labels.iter().any(|l| l.text == expected.as_str()), "missing {expected}");
         }
         assert!(!labels.iter().any(|l| l.text.contains("PRIMARY") || l.text.contains("MODIFIER") || l.text.contains("LEAVE")));

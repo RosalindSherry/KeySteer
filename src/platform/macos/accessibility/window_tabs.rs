@@ -27,6 +27,10 @@ unsafe extern "C" {
 }
 struct Context {
     windows: Vec<(WindowId, OwnedCf)>,
+    focused: CFString,
+    moved: CFString,
+    resized: CFString,
+    destroyed: CFString,
 }
 struct Observer {
     observer: OwnedCf,
@@ -58,13 +62,13 @@ unsafe extern "C" fn callback(
     let (context, name) = unsafe {
         (
             &*(raw as *const Context),
-            CFString::wrap_under_get_rule(notification).to_string(),
+            CFString::wrap_under_get_rule(notification),
         )
     };
-    if name == "AXFocusedWindowChanged" {
+    if name == context.focused {
         // Resolve the application's focused window once in the worker, not
         // once per member and never from this native callback.
-        crate::platform::macos::window_tabs::enqueue(TabNativeEvent::VisibilityChanged);
+        crate::platform::macos::window_tabs::enqueue_native(TabNativeEvent::VisibilityChanged);
         return;
     }
     let id = context
@@ -76,21 +80,47 @@ unsafe extern "C" fn callback(
         })
         .map(|(id, _)| *id);
     if let Some(id) = id {
-        crate::platform::macos::window_tabs::enqueue(if name == "AXUIElementDestroyed" {
+        crate::platform::macos::window_tabs::enqueue_native(if name == context.destroyed {
             TabNativeEvent::Closed(id)
-        } else if name == "AXMoved" || name == "AXResized" {
+        } else if name == context.moved || name == context.resized {
             TabNativeEvent::GeometryChanged(id)
         } else {
             TabNativeEvent::Changed(id)
         });
     }
 }
-#[derive(Default)]
 pub(super) struct Monitor {
     observers: BTreeMap<i32, Observer>,
+    wake: Option<crate::platform::macos::native::RunLoopWake>,
+}
+impl Default for Monitor {
+    fn default() -> Self {
+        Self {
+            observers: BTreeMap::new(),
+            wake: crate::platform::macos::native::RunLoopWake::new(),
+        }
+    }
 }
 impl Monitor {
+    pub fn clear(&mut self) {
+        self.observers.clear();
+    }
+    pub fn waker(&self) -> Option<std::sync::Arc<dyn Fn() + Send + Sync>> {
+        self.wake.as_ref().map(|wake| wake.waker())
+    }
+    pub fn wait(&self, timeout: Option<Duration>) -> bool {
+        if let Some(wake) = &self.wake {
+            wake.wait(timeout);
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn watch(&mut self, windows: &[(WindowId, i32, AXUIElementRef)]) -> Result<(), String> {
+        if self.wake.is_none() && !windows.is_empty() {
+            return Err("Cannot create window notification wake source".into());
+        }
         self.observers
             .retain(|pid, _| windows.iter().any(|(_, process, _)| pid == process));
         for pid in windows
@@ -121,6 +151,10 @@ impl Monitor {
                 unsafe { OwnedCf::from_create_rule(raw) }.ok_or("AX observer is unavailable")?;
             let mut context = Box::new(Context {
                 windows: Vec::new(),
+                focused: CFString::new("AXFocusedWindowChanged"),
+                moved: CFString::new("AXMoved"),
+                resized: CFString::new("AXResized"),
+                destroyed: CFString::new("AXUIElementDestroyed"),
             });
             for (id, _, window) in selected {
                 // SAFETY: caller retains each AX element; this source takes its own reference.
@@ -189,6 +223,11 @@ impl Monitor {
                     break;
                 }
             }
+        }
+        // Nonblocking AX dispatch may also consume the pipe's callback.
+        // Rearm it before the worker can enter its next blocking wait.
+        if let Some(wake) = &self.wake {
+            wake.drain();
         }
     }
 }

@@ -46,7 +46,7 @@ fn compose_columns(scene: &mut OverlayScene, input: KeyHelpView<'_>, max_columns
             grouped
                 .entry(action.into())
                 .or_default()
-                .push(keys.replace('_', " ").to_uppercase());
+                .push(crate::api::input::display_key_chord(keys));
         }
     }
     let (mut entries, sections) = if window_help {
@@ -718,7 +718,7 @@ fn compose_columns(scene: &mut OverlayScene, input: KeyHelpView<'_>, max_columns
         );
         push_panel_text(
             scene,
-            format!("{} · {name}", key.to_uppercase()),
+            format!("{} · {name}", crate::api::input::display_key_chord(&key)),
             Rect::new(
                 cell.x + 4.0 * scale,
                 mini.bottom() + 2.0 * scale,

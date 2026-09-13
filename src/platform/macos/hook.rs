@@ -964,6 +964,9 @@ fn handle_event(
             )
         }
         CGEventType::LeftMouseUp | CGEventType::RightMouseUp | CGEventType::OtherMouseUp => {
+            if matches!(event_type, CGEventType::LeftMouseUp) {
+                super::window_tabs::mouse_released();
+            }
             let button = match event_type {
                 CGEventType::LeftMouseUp => Some(MouseButton::Left),
                 CGEventType::RightMouseUp => Some(MouseButton::Right),

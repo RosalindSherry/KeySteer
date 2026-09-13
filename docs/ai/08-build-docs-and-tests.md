@@ -310,7 +310,7 @@ Quick 比例尺验收覆盖混合 1/2、1/3、0.3、0.45 和相近比例：原�
 Windows 主机只能交叉检查 macOS Rust（`cargo check --target aarch64-apple-darwin --lib --bins --tests`，Intel 同理），不能验证 Objective-C 编译、权限与真实音频。Mac 原生验收应使用打包的 .app：拒绝/授予系统音频权限；应用及系统每步 1%、按住重复、松开 V/Shift 停止；独立应用与系统输出；多进程浏览器；拔插输出；休眠/唤醒；退出后声音恢复。原有 `examples/macos_native_probe.rs` 引用了私有 crate 模块，尚不属于上述交叉检查范围。
 
 
-Tabs 优化验收：`cargo test --release tabs_geometry_baseline -- --ignored --nocapture`，可用 KEYSTEER_TABS_BENCH_OUTPUT 保存 CSV；每次涵盖 2/10/30 成员、各三轮 1000 次几何事件，记录 p50/p95/p99、快照读取和应用写入。它是模拟后端 CPU 基准，不是显示帧率或 compositor 延迟。回归覆盖单组更新、失败重试、手势结束校正，以及阻塞音频下的异步提交、队列上限和取消。Windows ignored 原生探针验证活动成员直接移动/缩放跟随、切换/解散、最大化恢复和标签拖放；实机跨屏 DPI 与高刷新率抖动仍需视觉验收。本轮不运行 macOS 测试。
+Tabs 优化验收：`cargo test --release tabs_geometry_baseline -- --ignored --nocapture`，可用 KEYSTEER_TABS_BENCH_OUTPUT 保存 CSV；每次涵盖 2/10/30 成员、各三轮 1000 次几何事件，记录 p50/p95/p99、快照读取和应用写入。它是模拟后端 CPU 基准，不是显示帧率或 compositor 延迟。回归覆盖单组更新、失败重试、手势结束校正，以及阻塞音频下的异步提交、队列上限和取消。Windows ignored 原生探针验证活动成员直接移动/缩放跟随、切换/解散、最大化恢复和标签拖放；实机跨屏 DPI 与高刷新率抖动仍需视觉验收。macOS 原生验收与性能入口见本专题末尾。
 
 
 音频安全检查复用现有 unsafe 总预算（未增加），将 Toolhelp 的一个块从音频调用层迁入 native 所有权封装；portable 安全门禁覆盖 platform/common。回归验证真实只读进程快照包含自身，以及音频失败后 worker 可继续处理下一项。测试断言可继续使用 unwrap。
@@ -323,3 +323,17 @@ Tabs 优化验收：`cargo test --release tabs_geometry_baseline -- --ignored --
 
 
 Move 精度回归覆盖 60/75/120/144/165/240/360/500Hz 的等时位移与边界反向，以及细粒度移动无鼠标回写、未变化帧无原生写入。此为逻辑测试，不能替代高刷新率显示器的视觉流畅度验收。
+
+macOS 原生 Window 验收：`cargo test --lib native_macos_window_parity -- --ignored --nocapture --test-threads=1`。测试用 clang 编译 `tests/fixtures/macos-window-parity.m`，创建独立子进程的三个临时 AppKit 窗口，仅按子进程 PID 操作；退出时终止子进程并删除临时文件，子进程另有 180 秒 watchdog。覆盖完全重叠窗口枚举、移动和居中、实际左右分屏、Editor 完整库存和自动平铺事务、两轮 F 三态循环、按应用自动组合、含栏最大化／最小化／恢复、窗口和组内切换、解散及关闭；也验证无音频进程时的应用音量／静音／输出偏好。活跃音频 Tap 与多硬件输出仍需专门的音频验收。需要实际桌面、Accessibility 权限和 Command Line Tools；普通 CI 忽略此项。纯回归覆盖负坐标屏幕受限分屏位置、标签最小宽度、活动项滚入与滚动边界。第三方应用最小化动画、跨屏拖放及层级遮挡仍需交互验收。
+
+首次原生验收可使用 `KEYSTEER_PROBE_REQUEST_ACCESSIBILITY=1 cargo test --lib native_macos_window_parity -- --ignored --nocapture --test-threads=1`，通过现有 AX 权限入口申请辅助功能权限并在同一测试进程中等待至多 120 秒；授权后自动继续。未设置该变量时缺少权限立即报错，不弹窗。已有权限直接运行；macOS 的授权对象／签名由系统决定，重建测试程序可能需要重新授权，不能保证一次授权永久有效。
+
+为避免在系统设置中选择 Cargo 的裸测试文件，推荐使用 `python3 tools/test-macos-windows.py`。脚本按 Cargo JSON 输出定位库测试程序，生成固定路径 `target/native-window-tests/KeySteer Native Tests.app`，通过 LaunchServices 启动该应用，仅运行窗口原生验收，日志保存在相邻的 `result.log`。`--prepare-only` 只构建授权对象。应用的 bundle identifier 固定且使用本地 ad-hoc 签名；使用稳定的 Foundation 启动器执行 bundle 外的测试二进制；Rust 重建不改变启动器的签名。启动器自身变更时系统仍可能要求重新授权。授权由系统设置的正常辅助功能流程完成，不修改 TCC 数据库。
+
+如果辅助功能开关已开而日志显示 `Failed to match existing code requirement`，旧条目的签名要求未更新，需要用户在系统设置中移除旧测试应用条目并重新添加当前 bundle；单纯关闭再打开可能无效。测试启动器与 Rust 测试二进制分离后，普通源码重编译不再改变负责授权的启动器。
+
+原生探针的屏幕工作区由临时 AppKit 子进程主线程提供，避免 Rust 测试线程使用 Core Graphics fallback 时漏掉菜单栏／Dock 留白。失败日志保留请求矩形、实际 AX 几何和只读 Quartz 信息，用于区分约束、异步同步和测试环境错误。
+
+macOS 原生性能：`python3 tools/test-macos-windows.py --performance --release`。复用已授权的稳定测试应用，1000 次先于等待的重复 mailbox 唤醒检查丢信号；临时 AppKit 窗口逐条接收变更，每次等 AX 通知确认后再发送下一条（2000 次，无移动定时器）；随后交错比较 20,000 对完整快照和几何读取，验证结果等价，写入 `target/native-window-tests/tabs-performance.csv` 的 p50/p95/p99。超时只检测测试故障，不驱动移动。
+
+共享模拟基准也可在 macOS 运行：`KEYSTEER_TABS_BENCH_OUTPUT=target/native-window-tests/tabs-shared-macos.csv cargo test --release --lib tabs_geometry_baseline -- --ignored --nocapture --test-threads=1`。它覆盖 2/10/30 成员的协调层成本和外部窗口写入次数，不是 macOS 原生渲染或屏幕 FPS；原生 AX 耗时同样不等于 compositor 帧率，多屏混合刷新率的视觉效果需单独注明实测硬件。

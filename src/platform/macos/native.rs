@@ -154,3 +154,68 @@ impl Drop for OwnedCf {
         unsafe { core_foundation::base::CFRelease(self.0) };
     }
 }
+
+// Signalable run-loop source shared by the window worker and AppKit publisher.
+pub(super) struct RunLoopWake {
+    reader: std::os::unix::net::UnixStream,
+    descriptor: core_foundation::filedescriptor::CFFileDescriptor,
+    source: core_foundation::runloop::CFRunLoopSource,
+    run_loop: core_foundation::runloop::CFRunLoop,
+    wake: std::sync::Arc<dyn Fn() + Send + Sync>,
+}
+impl RunLoopWake {
+    pub(super) fn waker(&self) -> std::sync::Arc<dyn Fn() + Send + Sync> {
+        self.wake.clone()
+    }
+    pub(super) fn new() -> Option<Self> {
+        use core_foundation::filedescriptor::*;
+        use std::io::Write;
+        use std::os::fd::AsRawFd;
+        extern "C" fn ready(_: CFFileDescriptorRef, _: usize, _: *mut c_void) {}
+        let (reader, writer) = std::os::unix::net::UnixStream::pair().ok()?;
+        reader.set_nonblocking(true).ok()?;
+        writer.set_nonblocking(true).ok()?;
+        let descriptor = CFFileDescriptor::new(reader.as_raw_fd(), false, ready, None)?;
+        let source = descriptor.to_run_loop_source(0)?;
+        let run_loop = core_foundation::runloop::CFRunLoop::get_current();
+        run_loop.add_source(
+            &source,
+            crate::platform::macos::native::default_run_loop_modes().core_foundation,
+        );
+        descriptor.enable_callbacks(kCFFileDescriptorReadCallBack);
+        let wake = std::sync::Arc::new(move || {
+            let _ = (&writer).write(&[1]);
+        });
+        Some(Self {
+            reader,
+            descriptor,
+            source,
+            run_loop,
+            wake,
+        })
+    }
+    pub(super) fn wait(&self, timeout: Option<std::time::Duration>) {
+        core_foundation::runloop::CFRunLoop::run_in_mode(
+            crate::platform::macos::native::default_run_loop_modes().core_foundation,
+            timeout.unwrap_or(std::time::Duration::from_secs(u32::MAX as u64)),
+            true,
+        );
+        self.drain();
+    }
+    pub(super) fn drain(&self) {
+        use std::io::Read;
+        let mut bytes = [0; 256];
+        while (&self.reader).read(&mut bytes).is_ok_and(|read| read > 0) {}
+        self.descriptor
+            .enable_callbacks(core_foundation::filedescriptor::kCFFileDescriptorReadCallBack);
+    }
+}
+impl Drop for RunLoopWake {
+    fn drop(&mut self) {
+        self.run_loop.remove_source(
+            &self.source,
+            crate::platform::macos::native::default_run_loop_modes().core_foundation,
+        );
+        self.descriptor.invalidate();
+    }
+}

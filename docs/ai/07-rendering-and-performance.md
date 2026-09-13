@@ -352,3 +352,11 @@ blocking waits; the Window inventory timer also remains. Fully event-driven
 completion requires preserving layout rejection/rollback and hidden-tab reveal
 ordering, and is not implemented by this optimization. No macOS native acceptance
 is claimed.
+
+macOS 持久标签栏与 Windows 同样提供最小可读标签宽度、局部滚动及拖放插入提示。AppKit viewport 负责裁剪，纯位置更新不重新创建控件，标题更新仅修改已有按钮；使用公开 Quartz 窗口编号按活动应用的普通层级排序。
+
+快捷键提示统一通过 `api::input::display_key_chord` 转换平台展示名：macOS 的内部 `win`／`alt` 显示为 CMD／OPTION，左右修饰键保留左右标识。键路由、配置 canonical 值保持不变，Windows 仍显示 WIN／ALT。
+
+## macOS 标签栏拖动快路径
+
+跟随由 AXMoved／AXResized 与现有鼠标松开事件驱动，不使用定时更新或固定帧率。worker 与 AppKit 各自通过持久的可唤醒 CFRunLoop source 收取事件；位置更新合并为每组最新状态。纯位移复用窗口、控件和标签内容，仅设置 panel 几何；只有 owner、可见性或结构发布变化才重新排序窗口层级，标题/成员变化仍更新内容。拖动期间不通过 set_frame 修改外部应用窗口，结束事件才进行必要的头部留白校正。

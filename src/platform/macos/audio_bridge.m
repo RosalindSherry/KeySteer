@@ -377,9 +377,29 @@ bool KSMaintainAudio(void *value) {
                 KSAppAudio *route = owner.routes[pid];
                 bool missing = route.outputUID != nil;
                 for (NSDictionary *output in outputs) if ([route.outputUID isEqualToString:output[@"uid"]]) missing = false;
+                if (!route.application || route.application.terminated || missing) {
+                    [route stop]; [owner.routes removeObjectForKey:pid]; continue;
+                }
+                NSArray *processes = AudioProcesses(pid.intValue);
+                // Keep the user's setting while a running application is silent.
+                // No tap or engine is held until an audio process exists.
+                if (!processes.count) {
+                    [route stop]; route.processes = @[];
+                    if (!route->ring) [owner.routes removeObjectForKey:pid];
+                    continue;
+                }
+                if (!route->tap) {
+                    NSDictionary *selected = nil;
+                    for (NSDictionary *output in outputs) if ([route.outputUID isEqualToString:output[@"uid"]]) selected = output;
+                    NSString *failure = StartApp(route, processes, selected);
+                    if (failure) {
+                        [route stop]; [owner.routes removeObjectForKey:pid];
+                        if (owner.log) owner.log(failure.UTF8String);
+                    }
+                    continue;
+                }
                 AudioStreamBasicDescription stream = {0}; UInt32 bytes = sizeof(stream);
                 bool invalidFormat = Read(route->tap, kAudioTapPropertyFormat, kAudioObjectPropertyScopeGlobal, 0, &bytes, &stream) != noErr || stream.mSampleRate != route.sampleRate || stream.mChannelsPerFrame != 2 || stream.mBitsPerChannel != 32 || !(stream.mFormatFlags & kAudioFormatFlagIsFloat);
-                NSArray *processes = AudioProcesses(pid.intValue);
                 bool updateFailed = false;
                 if (processes.count && ![route.processes isEqualToArray:processes]) {
                     CATapDescription *description = route.tapDescription;
@@ -389,7 +409,7 @@ bool KSMaintainAudio(void *value) {
                 }
                 // Restoring the original path is safer than leaving an app muted
                 // when its process, output device or render engine disappears.
-                if (!route.application || route.application.terminated || !processes.count || invalidFormat || updateFailed || missing || !route.engine.running) {
+                if (invalidFormat || updateFailed || !route.engine.running) {
                     [route stop]; [owner.routes removeObjectForKey:pid];
                 }
             }
@@ -418,8 +438,7 @@ bool KSChangeAudio(void *value, int32_t pid, uint64_t started, uint32_t action, 
                 if ([NSProcessInfo.processInfo isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){14, 2, 0}]) {
                     KSMaintainAudio(value);
                     NSArray *processes = AudioProcesses(pid);
-                    if (!processes.count) message = @"This application has no audio process yet";
-                    else {
+                    {
                         KSAppAudio *old = owner.routes[@(pid)];
                         float level = old ? old.level : 1; BOOL muted = old ? old.muted : NO;
                         NSString *uid = old.outputUID;
@@ -447,12 +466,14 @@ bool KSChangeAudio(void *value, int32_t pid, uint64_t started, uint32_t action, 
                                 next.application = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
                                 next.level = level; next.muted = muted; next.outputUID = uid;
                                 atomic_store(&next->ring->gain, muted ? 0 : level);
-                                NSString *failure = StartApp(next, processes, output);
+                                next.processes = processes;
+                                NSString *failure = processes.count ? StartApp(next, processes, output) : nil;
                                 if (failure) { [next stop]; message = failure; }
                                 else { [old stop]; owner.routes[@(pid)] = next; ok = true; }
                             }
                         }
                         if (ok) message = action >= 3 ? [@"App output: " stringByAppendingString:output[@"name"]] : action == 2 ? (muted ? @"App muted" : @"App unmuted") : [NSString stringWithFormat:@"App volume %.0f%%%s", level * 100, muted ? " · muted" : ""];
+                        if (ok && !processes.count) message = [message stringByAppendingString:@" · applies when audio starts"];
                     }
                 } else message = @"Application audio control requires macOS 14.2 or later";
             }

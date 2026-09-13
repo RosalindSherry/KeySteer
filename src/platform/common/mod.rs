@@ -14,5 +14,5 @@ pub(crate) mod window_placement;
 pub(crate) mod window_session;
 mod window_tab_model;
 mod window_tabs;
-#[cfg(all(test, target_os = "windows"))]
+#[cfg(all(test, any(target_os = "windows", target_os = "macos")))]
 pub(crate) use window_tabs::Grouped as WindowGroupsProbe;

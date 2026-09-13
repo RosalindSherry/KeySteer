@@ -38,6 +38,9 @@ struct AxApplication(OwnedCf);
 
 impl AxApplication {
     fn new(pid: libc::pid_t) -> Result<Self, String> {
+        Self::with_timeout(pid, NODE_TIMEOUT_SECONDS)
+    }
+    fn with_timeout(pid: libc::pid_t, timeout: c_float) -> Result<Self, String> {
         // SAFETY: AX returns a +1 application object for the pid; the owned
         // wrapper takes that create-rule reference exactly once. The timeout
         // is finite and is installed before any synchronous attribute query.
@@ -45,8 +48,7 @@ impl AxApplication {
             unsafe { OwnedCf::from_create_rule(AXUIElementCreateApplication(pid).cast()) }
                 .ok_or_else(|| "cannot create AX application element".to_string())?;
         // SAFETY: `application` is a live AXUIElement and the timeout is finite.
-        let error =
-            unsafe { AXUIElementSetMessagingTimeout(application.as_ptr(), NODE_TIMEOUT_SECONDS) };
+        let error = unsafe { AXUIElementSetMessagingTimeout(application.as_ptr(), timeout) };
         if error != AX_OK {
             return Err(format!(
                 "cannot set the AX messaging timeout for pid {pid}: AXError {error}"

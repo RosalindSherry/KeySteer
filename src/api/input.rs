@@ -593,8 +593,55 @@ impl<'de> Deserialize<'de> for ModeId {
     }
 }
 
+/// Human-facing key names. Canonical names remain unchanged for routing and TOML.
+pub fn display_key_chord(keys: &str) -> String {
+    display_key_chord_for(keys, cfg!(target_os = "macos"))
+}
+
+fn display_key_chord_for(keys: &str, macos: bool) -> String {
+    keys.split('+')
+        .map(|key| {
+            let key = key.to_ascii_lowercase();
+            let (side, key) = if let Some(key) = key.strip_prefix("left_") {
+                ("LEFT ", key)
+            } else if let Some(key) = key.strip_prefix("right_") {
+                ("RIGHT ", key)
+            } else {
+                ("", key.as_str())
+            };
+            let name = match key {
+                "win" | "cmd" | "command" if macos => "CMD",
+                "alt" | "option" if macos => "OPTION",
+                _ => return format!("{side}{}", key.replace('_', " ").to_uppercase()),
+            };
+            format!("{side}{name}")
+        })
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn display_names_follow_platform_without_changing_canonical_keys() {
+        assert_eq!(
+            super::display_key_chord_for("win+shift+s", true),
+            "CMD+SHIFT+S"
+        );
+        assert_eq!(
+            super::display_key_chord_for("left_win+alt+x", true),
+            "LEFT CMD+OPTION+X"
+        );
+        assert_eq!(
+            super::display_key_chord_for("right_win+alt+x", false),
+            "RIGHT WIN+ALT+X"
+        );
+        assert_eq!(super::display_key_chord_for("ctrl++", true), "CTRL++");
+        assert_eq!(
+            super::KeyChord::parse("win+s").unwrap().canonical(),
+            "win+s"
+        );
+    }
 
     #[test]
     fn mouse_side_button_names_and_aliases_are_canonical_trigger_keys() {

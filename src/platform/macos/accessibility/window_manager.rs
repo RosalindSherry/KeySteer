@@ -14,6 +14,8 @@ use core_graphics::window::{
 use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
 use std::collections::BTreeMap;
 
+const WINDOW_TIMEOUT_SECONDS: c_float = 0.25;
+
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
     fn AXUIElementGetPid(element: AXUIElementRef, pid: *mut libc::pid_t) -> c_int;
@@ -29,6 +31,9 @@ struct Entry {
     window: MovableWindow,
     pid: i32,
     restored: Option<Rect>,
+    maximized_frame: Option<Rect>,
+    settling_until: Option<Instant>,
+    number: Option<isize>,
     app: String,
 }
 
@@ -47,17 +52,64 @@ impl crate::platform::macos::window_move::WindowAccess for &MovableWindow {
 #[derive(Default)]
 pub(in crate::platform::macos) struct MacWindows {
     include_minimized: bool,
+    #[cfg(test)]
+    probe_pid: Option<i32>,
     next: u64,
     entries: BTreeMap<WindowId, Entry>,
     closed: Vec<WindowId>,
     hidden: std::collections::BTreeSet<WindowId>,
     monitor: super::window_tabs::Monitor,
+    dragging: std::collections::BTreeSet<WindowId>,
 }
 
 pub(super) struct Visible {
     pub(super) pid: i32,
     pub(super) bounds: Rect,
     title: Option<String>,
+    number: Option<isize>,
+}
+
+fn visible_candidates(
+    candidates: &[(Rect, &str)],
+    shown: &Visible,
+    remaining: &[Visible],
+) -> Vec<usize> {
+    let matches: Vec<_> = candidates
+        .iter()
+        .enumerate()
+        .filter(|(_, (bounds, title))| {
+            same_rect(*bounds, shown.bounds)
+                && shown
+                    .title
+                    .as_ref()
+                    .is_none_or(|t| t.is_empty() || t == title)
+        })
+        .map(|(index, _)| index)
+        .collect();
+    if matches.len() <= 1 {
+        return matches;
+    }
+    // Require enough on-screen records that each could describe every AX
+    // candidate. Otherwise an indistinguishable window may be on another Space.
+    let count = remaining
+        .iter()
+        .filter(|record| {
+            record.pid == shown.pid
+                && matches.iter().all(|index| {
+                    let (bounds, title) = candidates[*index];
+                    same_rect(bounds, record.bounds)
+                        && record
+                            .title
+                            .as_ref()
+                            .is_none_or(|t| t.is_empty() || t == title)
+                })
+        })
+        .count();
+    if count == matches.len() {
+        matches
+    } else {
+        Vec::new()
+    }
 }
 
 fn dictionary(value: &CFType) -> Option<CFDictionary<CFString, CFType>> {
@@ -86,6 +138,7 @@ pub(super) fn visible_windows() -> Result<Vec<Visible>, String> {
         "Width",
         "Height",
         "kCGWindowName",
+        "kCGWindowNumber",
     ]
     .map(CFString::new);
     let mut result = Vec::new();
@@ -132,12 +185,23 @@ pub(super) fn visible_windows() -> Result<Vec<Visible>, String> {
             pid: pid as i32,
             bounds: Rect::new(x, y, width, height),
             title,
+            number: number(&keys[8]).and_then(|n| isize::try_from(n).ok()),
         });
         if result.len() == 256 {
             break;
         }
     }
     Ok(result)
+}
+
+// Only called for AX elements retained by acquire or checked during enumeration.
+fn install_window_timeout(window: &OwnedCf) -> Result<(), String> {
+    // SAFETY: callers supply a retained AX element; timeout is finite.
+    if unsafe { AXUIElementSetMessagingTimeout(window.as_ptr(), WINDOW_TIMEOUT_SECONDS) } == AX_OK {
+        Ok(())
+    } else {
+        Err("cannot configure window messaging timeout".into())
+    }
 }
 
 fn same_rect(a: Rect, b: Rect) -> bool {
@@ -147,6 +211,53 @@ fn same_rect(a: Rect, b: Rect) -> bool {
         && (a.height - b.height).abs() < 2.0
 }
 
+// A missing AX acknowledgement is not a rejected write. Callers confirm by
+// bounded native readback before reporting geometry or minimized state.
+fn observe_write(result: Result<(), WriteError>) -> Result<(), String> {
+    match result {
+        Ok(()) | Err(WriteError::Unconfirmed(_)) => Ok(()),
+        Err(error) => Err(error.message().to_string()),
+    }
+}
+
+/// Keep constrained split windows on the target display, including its menu bar.
+fn adjusted_position(desired: Rect, actual: Rect, work: &Rect) -> Point {
+    let center = desired.center();
+    Point::new(
+        (center.x - actual.width / 2.0).clamp(work.x, (work.right() - actual.width).max(work.x)),
+        (center.y - actual.height / 2.0).clamp(work.y, (work.bottom() - actual.height).max(work.y)),
+    )
+}
+
+// Only the window worker waits. Do not interpret the first stale AX reply as
+// an application's minimum size; finish on the requested frame or a stable
+// changed frame, with a finite deadline and cancellation on every iteration.
+fn wait_frame(
+    window: &MovableWindow,
+    desired: Rect,
+    before: Rect,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Rect, String> {
+    let deadline = Instant::now() + Duration::from_millis(250);
+    let mut previous = before;
+    let mut stable_since = Instant::now();
+    loop {
+        let actual = element_rect(window.window.as_ptr(), &window.attributes)
+            .ok_or("cannot read adjusted window frame")?;
+        if same_rect(actual, desired) || cancelled() || Instant::now() >= deadline {
+            return Ok(actual);
+        }
+        if !same_rect(actual, previous) {
+            previous = actual;
+            stable_since = Instant::now();
+        } else if !same_rect(actual, before) && stable_since.elapsed() >= Duration::from_millis(30)
+        {
+            return Ok(actual);
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 impl MacWindows {
     fn retain(
         &mut self,
@@ -154,6 +265,8 @@ impl MacWindows {
         pid: i32,
         screens: &[Screen],
     ) -> Result<WindowInfo, String> {
+        // Acquired windows originate in the short-timeout scanner too.
+        install_window_timeout(&window.window)?;
         let existing = self
             .entries
             .iter()
@@ -172,6 +285,9 @@ impl MacWindows {
                     window,
                     pid,
                     restored: None,
+                    maximized_frame: None,
+                    settling_until: None,
+                    number: None,
                     app: NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
                         .and_then(|app| app.localizedName())
                         .map(|s| s.to_string())
@@ -238,17 +354,29 @@ impl MacWindows {
         }
         let window = &self.entry(id)?.window;
         let attribute = CFString::new("AXMinimized");
+        if copy_bool_attribute(window.window.as_ptr(), &attribute) == Some(minimized) {
+            return Ok(());
+        }
         let value = CFBoolean::from(minimized);
-        window
-            .set_attribute(&attribute, value.as_CFTypeRef())
-            .map_err(|e| e.message().to_string())?;
-        let deadline = Instant::now() + Duration::from_millis(250);
+        observe_write(window.set_attribute(&attribute, value.as_CFTypeRef()))?;
+        let started = Instant::now();
+        let deadline = started + Duration::from_millis(1000);
+        let mut retried = false;
         while !cancelled() {
             if copy_bool_attribute(window.window.as_ptr(), &attribute) == Some(minimized) {
                 return Ok(());
             }
             if Instant::now() >= deadline {
-                return Err("Timed out changing minimized state".into());
+                return Err(format!(
+                    "Timed out changing minimized state for window {} to {minimized}",
+                    id.0
+                ));
+            }
+            // AppKit can acknowledge but drop a request during a preceding
+            // minimize animation. Retry the same idempotent state once.
+            if !retried && started.elapsed() >= Duration::from_millis(250) {
+                observe_write(window.set_attribute(&attribute, value.as_CFTypeRef()))?;
+                retried = true;
             }
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -265,9 +393,7 @@ impl MacWindows {
             ))
         }
         .ok_or("cannot create window size")?;
-        window
-            .set_attribute(&window.attributes.size, value.as_ptr())
-            .map_err(|e| e.message().to_string())
+        observe_write(window.set_attribute(&window.attributes.size, value.as_ptr()))
     }
 }
 
@@ -279,7 +405,7 @@ impl MacWindows {
         if !self.entries.values().any(|entry| entry.pid == pid) {
             return None;
         }
-        let app = AxApplication::new(pid).ok()?;
+        let app = AxApplication::with_timeout(pid, WINDOW_TIMEOUT_SECONDS).ok()?;
         let focused = copy_attribute(app.as_ptr(), &CFString::new("AXFocusedWindow"))?;
         self.entries.iter().find_map(|(id, entry)| {
             // SAFETY: both retained AX elements remain live throughout this local comparison.
@@ -291,6 +417,47 @@ impl MacWindows {
 }
 
 impl WindowAccess for MacWindows {
+    fn event_waker(&self) -> Option<std::sync::Arc<dyn Fn() + Send + Sync>> {
+        let wake = self.monitor.waker();
+        crate::platform::macos::window_tabs::set_worker_waker(wake.clone());
+        wake
+    }
+    fn wait_for_events(&self, timeout: Option<Duration>) -> bool {
+        self.monitor.wait(timeout)
+    }
+    fn tab_interacting(&self, id: WindowId) -> bool {
+        self.dragging.contains(&id)
+    }
+    fn tab_geometry(
+        &self,
+        id: WindowId,
+        previous: &Snapshot,
+        screens: &[Screen],
+    ) -> Result<Snapshot, String> {
+        let entry = self.entry(id)?;
+        let window = &entry.window;
+        let bounds = element_rect(window.window.as_ptr(), &window.attributes)
+            .ok_or("window geometry unavailable")?;
+        let mut now = previous.clone();
+        now.info.bounds = bounds;
+        now.info.screen =
+            window_geometry::screen_index(screens, bounds).ok_or("display unavailable")?;
+        now.info.maximized = entry
+            .maximized_frame
+            .is_some_and(|frame| same_rect(bounds, frame));
+        now.info.minimized =
+            copy_bool_attribute(window.window.as_ptr(), &CFString::new("AXMinimized"))
+                .unwrap_or(previous.info.minimized);
+        now.info.fullscreen = copy_bool_attribute(window.window.as_ptr(), &window.fullscreen)
+            .unwrap_or(previous.info.fullscreen);
+        now.restored = if now.info.maximized {
+            entry.restored.unwrap_or(bounds)
+        } else {
+            bounds
+        };
+        Ok(now)
+    }
+
     fn set_scope(&mut self, scope: Option<crate::api::window::WindowScope>, _reset: bool) {
         self.include_minimized = scope.is_some_and(|scope| scope.include_minimized);
     }
@@ -331,11 +498,18 @@ impl WindowAccess for MacWindows {
         self.monitor.watch(&windows)
     }
     fn tab_bar_update(&mut self, bar: &crate::api::window_tabs::TabBar) -> Result<bool, String> {
-        crate::platform::macos::window_tabs::publish_one(bar)?;
+        crate::platform::macos::window_tabs::publish_one(bar, self.entry(bar.active)?.number)?;
         Ok(true)
     }
     fn tab_bars(&mut self, bars: &[crate::api::window_tabs::TabBar]) -> Result<(), String> {
-        crate::platform::macos::window_tabs::publish(bars);
+        crate::platform::macos::window_tabs::publish(
+            bars,
+            &self
+                .entries
+                .iter()
+                .filter_map(|(id, entry)| entry.number.map(|number| (*id, number)))
+                .collect::<Vec<_>>(),
+        );
         Ok(())
     }
     fn tab_selected(&self, id: WindowId) -> bool {
@@ -350,6 +524,33 @@ impl WindowAccess for MacWindows {
     fn tab_events(&mut self) -> Vec<crate::api::window_tabs::TabNativeEvent> {
         self.monitor.pump();
         let mut events = crate::platform::macos::window_tabs::take_events();
+        use crate::api::window_tabs::TabNativeEvent;
+        if !crate::platform::macos::window_tabs::take_mouse_release()
+            && objc2_app_kit::NSEvent::pressedMouseButtons() & 1 != 0
+        {
+            let moved: Vec<_> = events
+                .iter()
+                .filter_map(|event| {
+                    if let TabNativeEvent::GeometryChanged(id) = event {
+                        Some(*id)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            for id in moved {
+                if self.dragging.insert(id) {
+                    events.push(TabNativeEvent::MoveResizeStarted(id));
+                }
+            }
+        } else {
+            events.extend(
+                std::mem::take(&mut self.dragging)
+                    .into_iter()
+                    .map(TabNativeEvent::MoveResizeEnded),
+            );
+        }
+
         if events.contains(&crate::api::window_tabs::TabNativeEvent::VisibilityChanged)
             && let Some(id) = self.focused_window_id()
         {
@@ -381,6 +582,11 @@ impl WindowAccess for MacWindows {
         cancelled: &dyn Fn() -> bool,
     ) -> Result<Vec<WindowInfo>, String> {
         let visible = visible_windows()?;
+        #[cfg(test)]
+        let visible: Vec<_> = visible
+            .into_iter()
+            .filter(|w| self.probe_pid.is_none_or(|pid| w.pid == pid))
+            .collect();
         let mut result = Vec::new();
         let mut visited = std::collections::BTreeSet::new();
         let mut processes: Vec<_> = visible.iter().map(|record| record.pid).collect();
@@ -399,7 +605,11 @@ impl WindowAccess for MacWindows {
             if pid <= 0 || pid as u32 == std::process::id() || !visited.insert(pid) {
                 continue;
             }
-            let Ok(app) = AxApplication::new(pid) else {
+            #[cfg(test)]
+            if self.probe_pid.is_some_and(|expected| expected != pid) {
+                continue;
+            }
+            let Ok(app) = AxApplication::with_timeout(pid, WINDOW_TIMEOUT_SECONDS) else {
                 continue;
             };
             let Some(windows) = copy_array_attribute(app.as_ptr(), &CFString::new("AXWindows"))
@@ -419,10 +629,7 @@ impl WindowAccess for MacWindows {
                 let Some(owned) = (unsafe { OwnedCf::from_create_rule(CFRetain(*raw)) }) else {
                     continue;
                 };
-                // SAFETY: owned is a live AX element; the timeout is finite.
-                if unsafe { AXUIElementSetMessagingTimeout(owned.as_ptr(), NODE_TIMEOUT_SECONDS) }
-                    != AX_OK
-                {
+                if install_window_timeout(&owned).is_err() {
                     continue;
                 }
                 if copy_string_attribute(owned.as_ptr(), &CFString::new("AXSubrole")).as_deref()
@@ -452,33 +659,54 @@ impl WindowAccess for MacWindows {
                     .unwrap_or_default();
                 candidates.push((window, bounds, title));
             }
-            // Do not guess among identical windows in different Spaces. Match
-            // public on-screen metadata only when one AX candidate is possible.
-            for (rank, shown) in visible.iter().enumerate().filter(|(_, v)| v.pid == pid) {
-                if cancelled() {
-                    break;
-                }
-                let mut matches = candidates
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, (_, bounds, title))| {
-                        same_rect(*bounds, shown.bounds)
-                            && shown
-                                .title
-                                .as_ref()
-                                .is_none_or(|t| t.is_empty() || t == title)
-                    })
-                    .map(|(index, _)| index);
-                let unique = match (matches.next(), matches.next()) {
-                    (Some(index), None) => Some(index),
-                    _ => None,
-                };
-                if let Some(index) = unique {
-                    let (window, _, _) = candidates.remove(index);
-                    if let Ok(info) = self.retain(window, pid, screens) {
-                        result.push((rank, info));
+            // Quartz can omit titles without Screen Recording permission. A
+            // complete coincident cohort is still safe to enumerate, although
+            // its individual Quartz window numbers cannot be identified.
+            // AX can report a completed move before Quartz publishes it.
+            // Retry unmatched candidates against one fresh snapshot, rather
+            // than dropping a just-moved/restored window from Editor or Tabs.
+            let mut refreshed;
+            let mut current = &visible;
+            let settling_until = self
+                .entries
+                .values()
+                .filter(|e| e.pid == pid)
+                .filter_map(|e| e.settling_until)
+                .max();
+            let mut pass = 0;
+            loop {
+                for (rank, shown) in current.iter().enumerate().filter(|(_, v)| v.pid == pid) {
+                    if cancelled() {
+                        break;
+                    }
+                    let metadata: Vec<_> = candidates
+                        .iter()
+                        .map(|(_, bounds, title)| (*bounds, title.as_str()))
+                        .collect();
+                    let matches = visible_candidates(&metadata, shown, &current[rank..]);
+                    let number = (matches.len() == 1).then_some(shown.number).flatten();
+                    for index in matches.into_iter().rev() {
+                        let (window, _, _) = candidates.remove(index);
+                        if let Ok(info) = self.retain(window, pid, screens) {
+                            if let Some(entry) = self.entries.get_mut(&info.id) {
+                                entry.number = number;
+                            }
+                            result.push((rank, info));
+                        }
                     }
                 }
+                if candidates.is_empty() || cancelled() {
+                    break;
+                }
+                if pass > 0 {
+                    if settling_until.is_none_or(|until| Instant::now() >= until) {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                pass += 1;
+                refreshed = visible_windows()?;
+                current = &refreshed;
             }
         }
         result.sort_by_key(|(rank, _)| *rank);
@@ -502,7 +730,9 @@ impl WindowAccess for MacWindows {
             .ok_or("window was closed or its bounds are unavailable")?;
         let screen = window_geometry::screen_index(screens, bounds).ok_or("display unavailable")?;
         let resizable = Self::resizable(window).unwrap_or(false);
-        let maximized = entry.restored.is_some() && same_rect(bounds, screens[screen].work_area);
+        let maximized = entry
+            .maximized_frame
+            .is_some_and(|frame| same_rect(bounds, frame));
         Ok(Snapshot {
             info: WindowInfo {
                 id,
@@ -521,7 +751,11 @@ impl WindowAccess for MacWindows {
                 fullscreen: copy_bool_attribute(window.window.as_ptr(), &window.fullscreen)
                     .unwrap_or(false),
             },
-            restored: entry.restored.unwrap_or(bounds),
+            restored: if maximized {
+                entry.restored.unwrap_or(bounds)
+            } else {
+                bounds
+            },
         })
     }
     fn set_frame(
@@ -541,44 +775,93 @@ impl WindowAccess for MacWindows {
             return Err("invalid window geometry".into());
         }
         let before = self.snapshot(id, screens)?;
+        if cancelled() {
+            return Ok(before.info);
+        }
         if before.info.fullscreen {
             return Err("Exit native fullscreen before adjusting this window".into());
         }
         if before.info.minimized && !self.hidden.contains(&id) {
             self.set_minimized(id, false, cancelled)?;
         }
-        let window = &self.entry(id)?.window;
-        if cancelled() {
-            return Ok(before.info);
-        }
-        let resizing = (desired.width - before.info.bounds.width).abs() > 0.5
-            || (desired.height - before.info.bounds.height).abs() > 0.5;
-        if resizing {
-            Self::set_size(window, desired.width, desired.height)?;
-        }
         if cancelled() {
             return self.snapshot(id, screens).map(|s| s.info);
         }
-        // Read back accepted dimensions before positioning, preserving the
-        // requested centre when an application enforces its own size limits.
-        let actual = element_rect(window.window.as_ptr(), &window.attributes)
-            .ok_or("cannot read adjusted size")?;
-        let center = desired.center();
-        let position = if resizing {
-            Point::new(
-                center.x - actual.width / 2.0,
-                center.y - actual.height / 2.0,
-            )
-        } else {
-            Point::new(desired.x, desired.y)
-        };
-        if (position.x - actual.x).abs() > 0.5 || (position.y - actual.y).abs() > 0.5 {
-            window
-                .set_position(position)
-                .map_err(|e| e.message().to_string())?;
+        let window = &self.entry(id)?.window;
+        let resizing = (desired.width - before.info.bounds.width).abs() > 0.5
+            || (desired.height - before.info.bounds.height).abs() > 0.5;
+        // AX providers can constrain size to the space available at the old
+        // origin. Move first, resize, then correct the accepted frame. A second
+        // size write handles providers which apply position asynchronously.
+        if (desired.x - before.info.bounds.x).abs() > 0.5
+            || (desired.y - before.info.bounds.y).abs() > 0.5
+        {
+            observe_write(window.set_position(Point::new(desired.x, desired.y)))?;
+        }
+        if resizing && !cancelled() {
+            Self::set_size(window, desired.width, desired.height)?;
+        }
+        let mut actual = wait_frame(window, desired, before.info.bounds, cancelled)?;
+        if resizing && !cancelled() && !same_rect(actual, desired) {
+            Self::set_size(window, desired.width, desired.height)?;
+            actual = wait_frame(window, desired, actual, cancelled)?;
+        }
+        if !cancelled() {
+            let position = if resizing {
+                adjusted_position(
+                    desired,
+                    actual,
+                    &screens[window_geometry::screen_index(screens, desired)
+                        .ok_or("display unavailable")?]
+                    .work_area,
+                )
+            } else {
+                Point::new(desired.x, desired.y)
+            };
+            if (position.x - actual.x).abs() > 0.5 || (position.y - actual.y).abs() > 0.5 {
+                observe_write(window.set_position(position))?;
+                wait_frame(
+                    window,
+                    Rect::new(position.x, position.y, actual.width, actual.height),
+                    actual,
+                    cancelled,
+                )?;
+            }
+        }
+        let accepted = self.snapshot(id, screens)?;
+        #[cfg(test)]
+        if self.probe_pid.is_some() && !same_rect(accepted.info.bounds, desired) {
+            println!(
+                "Frame {id:?}: requested {desired:?}, accepted {:?}",
+                accepted.info.bounds
+            );
+        }
+        if !cancelled() || !same_rect(accepted.info.bounds, before.info.bounds) {
+            let entry = self.entries.get_mut(&id).ok_or("window was closed")?;
+            entry.restored = None;
+            entry.maximized_frame = None;
+            entry.settling_until = Some(Instant::now() + Duration::from_millis(250));
         }
         self.snapshot(id, screens).map(|s| s.info)
     }
+    fn tab_fit_frame(
+        &mut self,
+        id: WindowId,
+        bounds: Rect,
+        screens: &[Screen],
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<WindowInfo, String> {
+        let before = self.snapshot(id, screens)?;
+        self.set_frame(id, bounds, screens, cancelled)?;
+        if before.info.maximized && !cancelled() {
+            let accepted = self.snapshot(id, screens)?.info.bounds;
+            let entry = self.entries.get_mut(&id).ok_or("window was closed")?;
+            entry.restored = Some(before.restored);
+            entry.maximized_frame = Some(accepted);
+        }
+        self.snapshot(id, screens).map(|s| s.info)
+    }
+
     fn restore(
         &mut self,
         snapshot: &Snapshot,
@@ -597,11 +880,16 @@ impl WindowAccess for MacWindows {
                 )
                 .map(|(window, _)| window);
         }
-        self.entries
-            .get_mut(&snapshot.info.id)
-            .ok_or("window was closed")?
-            .restored = snapshot.info.maximized.then_some(snapshot.restored);
         self.set_frame(snapshot.info.id, snapshot.info.bounds, screens, cancelled)?;
+        if !cancelled() {
+            let accepted = self.snapshot(snapshot.info.id, screens)?.info.bounds;
+            let entry = self
+                .entries
+                .get_mut(&snapshot.info.id)
+                .ok_or("window was closed")?;
+            entry.restored = snapshot.info.maximized.then_some(snapshot.restored);
+            entry.maximized_frame = snapshot.info.maximized.then_some(accepted);
+        }
         self.set_minimized(snapshot.info.id, snapshot.info.minimized, cancelled)?;
         self.snapshot(snapshot.info.id, screens).map(|s| s.info)
     }
@@ -631,19 +919,19 @@ impl WindowAccess for MacWindows {
             self.set_minimized(id, true, cancelled)?;
             return self.snapshot(id, screens).map(|s| s.info);
         }
-        self.entries
-            .get_mut(&id)
-            .ok_or("window was closed")?
-            .restored = Some(before.info.bounds);
-        self.set_frame(
-            id,
-            screens
-                .get(before.info.screen)
-                .ok_or("display unavailable")?
-                .work_area,
-            screens,
-            cancelled,
-        )
+        let desired = screens
+            .get(before.info.screen)
+            .ok_or("display unavailable")?
+            .work_area;
+        let after = self.set_frame(id, desired, screens, cancelled)?;
+        if !cancelled()
+            && (same_rect(after.bounds, desired) || !same_rect(after.bounds, before.info.bounds))
+        {
+            let entry = self.entries.get_mut(&id).ok_or("window was closed")?;
+            entry.restored = Some(before.info.bounds);
+            entry.maximized_frame = Some(after.bounds);
+        }
+        self.snapshot(id, screens).map(|s| s.info)
     }
 
     fn audio_factory(&self) -> Option<crate::platform::common::audio_worker::AudioFactory> {
@@ -677,9 +965,29 @@ impl WindowAccess for MacWindows {
             )
         };
         if error != AX_OK {
-            return Err(format!("cannot raise window: AXError {error}"));
+            // Some AX providers do not expose Raise but do expose Main/Focused.
+            let value = CFBoolean::true_value();
+            for attribute in ["AXMain", "AXFocused"] {
+                let _ = entry
+                    .window
+                    .set_attribute(&CFString::new(attribute), value.as_CFTypeRef());
+            }
         }
-        Ok(())
+        let deadline = Instant::now() + Duration::from_millis(250);
+        loop {
+            if self.focused_window_id() == Some(id) {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if error == AX_OK {
+            Ok(())
+        } else {
+            Err(format!("cannot activate window: AXError {error}"))
+        }
     }
     fn pointer(&self) -> Result<Point, String> {
         crate::platform::macos::input::cursor_position()
@@ -696,7 +1004,7 @@ impl WindowAccess for MacWindows {
         }
         // SAFETY: both retained AX objects remain live during the bounded action.
         let error = unsafe {
-            let timeout = AXUIElementSetMessagingTimeout(button.as_ptr(), NODE_TIMEOUT_SECONDS);
+            let timeout = AXUIElementSetMessagingTimeout(button.as_ptr(), WINDOW_TIMEOUT_SECONDS);
             if timeout != AX_OK {
                 timeout
             } else {
@@ -748,8 +1056,9 @@ impl WindowAccess for MacWindows {
                 return;
             }
         }
-        crate::platform::macos::window_tabs::publish(&[]);
-        self.monitor = Default::default();
+        crate::platform::macos::window_tabs::publish(&[], &[]);
+        self.monitor.clear();
+        self.dragging.clear();
         self.entries.clear();
         self.closed.clear();
     }
@@ -761,5 +1070,480 @@ impl WindowAccess for MacWindows {
 impl Drop for MacWindows {
     fn drop(&mut self) {
         self.reset();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn coincident_windows_are_kept_only_when_the_entire_cohort_is_on_screen() {
+        let bounds = Rect::new(100.0, 100.0, 400.0, 300.0);
+        let candidates = [(bounds, "First"), (bounds, "Second")];
+        let records = [0, 1].map(|number| Visible {
+            pid: 10,
+            bounds,
+            title: None,
+            number: Some(number),
+        });
+        assert_eq!(
+            visible_candidates(&candidates, &records[0], &records),
+            vec![0, 1]
+        );
+        assert!(visible_candidates(&candidates, &records[0], &records[..1]).is_empty());
+        let named = Visible {
+            pid: 10,
+            bounds,
+            title: Some("Second".into()),
+            number: Some(1),
+        };
+        assert_eq!(visible_candidates(&candidates, &named, &records), vec![1]);
+    }
+
+    #[test]
+    fn constrained_splits_stay_inside_the_target_work_area() {
+        let work = Rect::new(-1440.0, 25.0, 1440.0, 875.0);
+        let left = Rect::new(-1440.0, 25.0, 360.0, 875.0);
+        let accepted = Rect::new(-1440.0, 25.0, 500.0, 875.0);
+        assert_eq!(
+            adjusted_position(left, accepted, &work),
+            Point::new(-1440.0, 25.0)
+        );
+        let right = Rect::new(-360.0, 25.0, 360.0, 875.0);
+        assert_eq!(
+            adjusted_position(right, accepted, &work),
+            Point::new(-500.0, 25.0)
+        );
+        let oversized = Rect::new(0.0, 0.0, 2000.0, 1200.0);
+        assert_eq!(
+            adjusted_position(left, oversized, &work),
+            Point::new(-1440.0, 25.0)
+        );
+    }
+
+    #[test]
+    #[ignore = "Creates disposable AppKit windows; requires Accessibility permission and clang"]
+    fn native_macos_window_parity() -> Result<(), String> {
+        native_probe(false)
+    }
+
+    #[test]
+    #[ignore = "Native AX benchmark; use tools/test-macos-windows.py --performance --release"]
+    fn native_macos_tabs_geometry_performance() -> Result<(), String> {
+        native_probe(true)
+    }
+
+    fn native_probe(performance: bool) -> Result<(), String> {
+        use crate::api::window_tabs::{TabOperation, WindowTarget};
+        use crate::platform::common::WindowGroupsProbe as Grouped;
+        let permissions = crate::platform::macos::permissions::is_trusted;
+        if !permissions()
+            && std::env::var("KEYSTEER_PROBE_REQUEST_ACCESSIBILITY").as_deref() == Ok("1")
+        {
+            crate::platform::macos::permissions::prompt_for_trust();
+            // The system prompt is asynchronous. Granting access continues this
+            // same test process; do not rebuild while the user is authorizing it.
+            let deadline = Instant::now() + Duration::from_secs(120);
+            while !permissions() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(250));
+            }
+        }
+        if !permissions() {
+            return Err(
+                "Native parity probe requires Accessibility permission for the test host. Run with KEYSTEER_PROBE_REQUEST_ACCESSIBILITY=1 to request access and wait up to 120 seconds".into(),
+            );
+        }
+        struct Child(std::process::Child);
+        impl Drop for Child {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        struct Directory(std::path::PathBuf);
+        impl Drop for Directory {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let path = std::env::temp_dir().join(format!(
+            "keysteer-parity-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| e.to_string())?
+                .as_nanos()
+        ));
+        std::fs::create_dir(&path).map_err(|e| e.to_string())?;
+        let temp = Directory(path);
+        let binary = temp.0.join("window-parity");
+        let built = std::process::Command::new("/usr/bin/clang")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/macos-window-parity.m"
+            ))
+            .args(["-fobjc-arc", "-framework", "AppKit", "-o"])
+            .arg(&binary)
+            .output()
+            .map_err(|e| e.to_string())?;
+        if !built.status.success() {
+            return Err(String::from_utf8_lossy(&built.stderr).into_owned());
+        }
+        let mut child = Child(
+            std::process::Command::new(binary)
+                .stdout(std::process::Stdio::piped())
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+                .map_err(|e| e.to_string())?,
+        );
+        // Rust's test runs off the main thread; use the helper's AppKit work
+        // areas, just as the production main-thread backend does (including Dock/menu).
+        use std::io::BufRead;
+        let mut line = String::new();
+        std::io::BufReader::new(child.0.stdout.take().ok_or("missing helper stdout")?)
+            .read_line(&mut line)
+            .map_err(|e| e.to_string())?;
+        let screens: Vec<_> = line
+            .trim()
+            .split(';')
+            .filter(|s| !s.is_empty())
+            .enumerate()
+            .map(|(index, screen)| {
+                let values: Vec<f64> = screen
+                    .split(',')
+                    .map(|v| v.parse().expect("screen coordinate"))
+                    .collect();
+                assert_eq!(values.len(), 9);
+                Screen {
+                    bounds: Rect::new(values[0], values[1], values[2], values[3]),
+                    work_area: Rect::new(values[4], values[5], values[6], values[7]),
+                    scale: values[8],
+                    is_primary: index == 0,
+                    name: None,
+                }
+            })
+            .collect();
+        assert!(!screens.is_empty());
+        let mut native = MacWindows::default();
+        let inventory = native.enumerate(&screens, &|| false)?;
+        let mut counts = BTreeMap::<String, usize>::new();
+        for window in &inventory {
+            *counts.entry(window.app.clone()).or_default() += 1;
+        }
+        println!("Read-only desktop inventory: {counts:?}");
+        native.probe_pid = Some(child.0.id() as i32);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let windows = loop {
+            let windows: Vec<_> = native
+                .enumerate(&screens, &|| false)?
+                .into_iter()
+                .filter(|w| {
+                    native
+                        .entries
+                        .get(&w.id)
+                        .is_some_and(|e| e.pid == child.0.id() as i32)
+                })
+                .collect();
+            if windows.len() == 3 {
+                break windows;
+            }
+            if Instant::now() >= deadline {
+                return Err("Disposable AX windows unavailable; grant Accessibility permission to the test host".into());
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+
+        if performance {
+            use crate::api::window_tabs::TabNativeEvent;
+            use std::io::Write;
+            let id = windows.iter().find(|w| w.title.ends_with(" 0")).unwrap().id;
+            native.tab_watch(&windows.iter().map(|w| w.id).collect::<Vec<_>>())?;
+            let percentile = |values: &mut Vec<u128>, fraction: usize| {
+                values.sort_unstable();
+                values[(values.len() - 1) * fraction / 100]
+            };
+            let mut rows = vec!["path,samples,p50_us,p95_us,p99_us".to_string()];
+            let mut delivery = Vec::with_capacity(2000);
+            for _ in 0..2000 {
+                native.tab_events();
+                let start = Instant::now();
+                child
+                    .0
+                    .stdin
+                    .as_mut()
+                    .ok_or("missing helper stdin")?
+                    .write_all(b"m")
+                    .map_err(|e| e.to_string())?;
+                loop {
+                    // Deadline detects a broken fixture, never paces movement.
+                    native.wait_for_events(Some(Duration::from_secs(2)));
+                    if native
+                        .tab_events()
+                        .contains(&TabNativeEvent::GeometryChanged(id))
+                    {
+                        break;
+                    }
+                    assert!(
+                        start.elapsed() < Duration::from_secs(2),
+                        "missing native movement notification"
+                    );
+                }
+                delivery.push(start.elapsed().as_micros());
+            }
+            rows.push(format!(
+                "event_driven_delivery,2000,{},{},{}",
+                percentile(&mut delivery, 50),
+                percentile(&mut delivery, 95),
+                percentile(&mut delivery, 99)
+            ));
+            let previous = native.snapshot(id, &screens)?;
+            let mut full = Vec::with_capacity(20000);
+            let mut geometry = Vec::with_capacity(20000);
+            for step in 0..20200 {
+                let start = Instant::now();
+                let baseline = native.snapshot(id, &screens)?;
+                let elapsed = start.elapsed().as_micros();
+                let start = Instant::now();
+                let actual = native.tab_geometry(id, &previous, &screens)?;
+                let fast_elapsed = start.elapsed().as_micros();
+                assert_eq!(baseline.info, actual.info);
+                assert_eq!(baseline.restored, actual.restored);
+                if step >= 200 {
+                    full.push(elapsed);
+                    geometry.push(fast_elapsed);
+                }
+            }
+            for (name, values) in [
+                ("full_snapshot", &mut full),
+                ("geometry_only", &mut geometry),
+            ] {
+                rows.push(format!(
+                    "{name},{},{},{},{}",
+                    values.len(),
+                    percentile(values, 50),
+                    percentile(values, 95),
+                    percentile(values, 99)
+                ));
+            }
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("target/native-window-tests/tabs-performance.csv");
+            std::fs::write(&path, rows.join("\n")).map_err(|e| e.to_string())?;
+            println!("{}\n{}", path.display(), rows.join("\n"));
+            return Ok(());
+        }
+        let id = windows[0].id;
+        let original = native.snapshot(id, &screens)?;
+        let work = screens[original.info.screen].work_area;
+        let split = Rect::new(work.x, work.y + 50.0, work.width / 2.0, work.height - 100.0);
+        let tiled = native.set_frame(id, split, &screens, &|| false)?;
+        assert!(
+            same_rect(tiled.bounds, split),
+            "accepted {:?}, expected {:?}",
+            tiled.bounds,
+            split
+        );
+        native.restore(&original, &screens, &|| false)?;
+        println!("Probe: standalone F cycle");
+        for _ in 0..2 {
+            assert!(native.cycle_state(id, &screens, &|| false)?.maximized);
+            assert!(native.cycle_state(id, &screens, &|| false)?.minimized);
+            let restored = native.cycle_state(id, &screens, &|| false)?;
+            assert!(!restored.maximized && !restored.minimized);
+            assert!(same_rect(restored.bounds, original.info.bounds));
+        }
+        use crate::api::window::{WindowChange, WindowEditResult, WindowOperation};
+        use crate::api::window_layout::{LayoutTree, placed_rect};
+        use crate::platform::common::window_session::WindowSessionProbe;
+        println!("Probe: move, center and Editor");
+        let mut session = WindowSessionProbe::new(id);
+        for change in [
+            WindowChange::Move { dx: 45.0, dy: 30.0 },
+            WindowChange::Center,
+        ] {
+            let result = session.execute(
+                &mut native,
+                WindowOperation::Adjust {
+                    target: id,
+                    change,
+                    group: 1,
+                },
+                &screens,
+            );
+            assert_eq!(result.changed, 1, "{result:?}");
+        }
+        let centered = native.snapshot(id, &screens)?.info.bounds;
+        assert!((centered.x + centered.width / 2.0 - work.x - work.width / 2.0).abs() < 2.0);
+        assert!((centered.y + centered.height / 2.0 - work.y - work.height / 2.0).abs() < 2.0);
+        let begun = session.execute(
+            &mut native,
+            WindowOperation::BeginEdit {
+                transaction: 2,
+                targets: vec![],
+                screen: Some(original.info.screen),
+                group: 2,
+            },
+            &screens,
+        );
+        let Some(WindowEditResult::Started {
+            minimums,
+            full_inventory: true,
+            ..
+        }) = begun.edit.as_deref()
+        else {
+            panic!("{begun:?}")
+        };
+        if minimums.len() != 3 {
+            println!("Editor result: {begun:?}");
+            for record in visible_windows()?
+                .into_iter()
+                .filter(|w| w.pid == child.0.id() as i32)
+            {
+                println!("Quartz: {:?} {:?}", record.bounds, record.title);
+            }
+            for member in &windows {
+                println!("AX: {:?}", native.snapshot(member.id, &screens));
+            }
+        }
+        assert_eq!(
+            minimums.len(),
+            3,
+            "Editor must capture all disposable windows"
+        );
+        let tree = LayoutTree::automatic(
+            begun.windows.as_ref().unwrap(),
+            Some(id),
+            work,
+            &minimums.iter().copied().collect(),
+            0.0,
+        )?;
+        let placements: Vec<_> = tree
+            .slots()
+            .into_iter()
+            .filter_map(|s| s.window.map(|id| (id, s.rect)))
+            .collect();
+        let applied = session.execute(
+            &mut native,
+            WindowOperation::ApplyLayout {
+                additional_screens: vec![],
+                transaction: 2,
+                revision: 1,
+                screen: original.info.screen,
+                placements: placements.clone(),
+                gap: 0.0,
+                strict: true,
+            },
+            &screens,
+        );
+        assert!(
+            matches!(
+                applied.edit.as_deref(),
+                Some(WindowEditResult::Applied { accepted: true, .. })
+            ),
+            "{applied:?}"
+        );
+        for (member, rect) in placements {
+            assert!(same_rect(
+                native.snapshot(member, &screens)?.info.bounds,
+                placed_rect(work, rect, 0.0)
+            ));
+        }
+        session.execute(
+            &mut native,
+            WindowOperation::EndEdit {
+                transaction: 2,
+                commit: true,
+            },
+            &screens,
+        );
+        // Quick's normalized left/right halves must be real native geometry.
+        for (index, member) in windows.iter().take(2).enumerate() {
+            let half = Rect::new(
+                work.x + index as f64 * work.width / 2.0,
+                work.y,
+                work.width / 2.0,
+                work.height,
+            );
+            assert!(same_rect(
+                native
+                    .set_frame(member.id, half, &screens, &|| false)?
+                    .bounds,
+                half
+            ));
+        }
+        let cycled = session.execute(&mut native, WindowOperation::Cycle, &screens);
+        assert!(
+            cycled.target.as_ref().is_some_and(|target| target.id != id),
+            "{cycled:?}"
+        );
+        // A silent app accepts and retains volume/mute/output preferences.
+        use crate::api::audio::AudioAction;
+        use crate::platform::macos::window_audio::{AudioController, process};
+        let mut audio = AudioController::default();
+        let process = Some(process(child.0.id() as i32)?);
+        assert!(audio.change(process, AudioAction::Down)?.contains("99%"));
+        assert!(audio.maintain());
+        assert!(
+            audio
+                .change(process, AudioAction::ToggleMute)?
+                .contains("muted")
+        );
+        audio.change(process, AudioAction::ToggleMute)?;
+        assert!(audio.change(process, AudioAction::Up)?.contains("100%"));
+        assert!(!audio.maintain());
+        audio.change(process, AudioAction::DeviceNext)?;
+        audio.change(process, AudioAction::DevicePrevious)?;
+        drop(audio);
+        println!("Probe: automatic application tabs");
+        let mut grouped = Grouped::new(native);
+        grouped.tab_operation(
+            TabOperation::Enter {
+                screen: original.info.screen,
+            },
+            &screens,
+            &|| false,
+        )?;
+        grouped.tab_operation(
+            TabOperation::Choose(WindowTarget::Window(id)),
+            &screens,
+            &|| false,
+        )?;
+        assert_eq!(
+            grouped.tab_state().ok_or("missing tab state")?.groups[0]
+                .members
+                .len(),
+            3
+        );
+        assert!(grouped.cycle_state(id, &screens, &|| false)?.maximized);
+        assert!(grouped.cycle_state(id, &screens, &|| false)?.minimized);
+        assert!(!grouped.cycle_state(id, &screens, &|| false)?.minimized);
+        grouped.tab_operation(TabOperation::Cycle { backwards: false }, &screens, &|| {
+            false
+        })?;
+        grouped.tab_operation(TabOperation::Dissolve, &screens, &|| false)?;
+        assert!(
+            grouped
+                .tab_state()
+                .ok_or("missing tab state")?
+                .groups
+                .is_empty()
+        );
+        grouped.close(id)?;
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let remaining = grouped.enumerate(&screens, &|| false)?;
+            if remaining.len() == 2 && remaining.iter().all(|w| w.id != id) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "Close did not retire the disposable window"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        println!(
+            "Native parity: enumerate overlapping windows, move, center, F, left/right split, Editor autotile, Tab cycle, auto app groups, close and silent-app audio passed"
+        );
+        Ok(())
     }
 }

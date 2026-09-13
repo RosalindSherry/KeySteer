@@ -1,5 +1,9 @@
 # Release notes
 
+## 0.10.3
+
+Fixed window layout, maximization, and key hint issues on macOS.
+
 ## 0.10.2
 
 Fixed an issue where borders, window numbers, and other window state could remain after closing a window.

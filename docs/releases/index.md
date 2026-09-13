@@ -1,5 +1,11 @@
 # 更新日志 / Release Notes
 
+## 0.10.3
+
+修复 macOS 上的窗口布局、最大化和按键提示问题。
+
+Fixed window layout, maximization, and key hint issues on macOS.
+
 ## 0.10.2
 
 修复关闭窗口后，边框、编号等状态仍可能残留的问题。
@@ -132,7 +138,7 @@ Fixed [Issue #1](https://github.com/dccif/KeySteer/issues/1), where a click coul
 
 UI Hint 针对常见的 129–256 个标签新增会话级复用工作区、精确的 X 轴扫描和二元重叠组快速路径，
 
-UI Hint now uses a reusable session workspace, an exact X-axis sweep, and a fast path for two-label overlap groups in the common 129–256-label range while preserving the inline path through 128 labels. 
+UI Hint now uses a reusable session workspace, an exact X-axis sweep, and a fast path for two-label overlap groups in the common 129–256-label range while preserving the inline path through 128 labels.
 
 ## 0.9.5
 
@@ -224,7 +230,7 @@ Cursor and indicator movement is now smoother on Windows and macOS, while key co
 
 Fixed `n = "toggle"`: hold `n` alone to keep it pressed, use it with keyboard or mouse keys in either order to lock them correctly, and tap `n` to release everything.
 
-## 0.8.5 
+## 0.8.5
 
 Windows 和 macOS 的移动、显示、按键响应及界面查找更快、更省内存，同时保持原有配置和操作方式不变。
 

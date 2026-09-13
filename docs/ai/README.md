@@ -95,3 +95,11 @@ Editor/Tabs 按键几何更新的跨平台局部发布、快照复用及尚存�
 
 
 关闭请求的面板即时反馈、保持标记稳定和立即库存核对见 [模式生命周期](04-modes-and-lifecycle.md)。
+
+macOS Quick／Editor AX 几何确认、F 含标签栏三态循环、Tabs 滚动和拖放及原生临时窗口验收见 [后端](06-platform-backends.md)、[渲染](07-rendering-and-performance.md) 和 [验证](08-build-docs-and-tests.md)。
+
+macOS 自动原生验收应用、辅助功能申请和日志入口见 [构建与验证](08-build-docs-and-tests.md)。
+
+macOS 平台按键展示名、重叠窗口完整枚举和静默应用音频偏好见 [渲染](07-rendering-and-performance.md)、[原生后端](06-platform-backends.md) 和 [验证](08-build-docs-and-tests.md)。
+
+macOS Tabs 无定时器的 AX／鼠标松开跟随、worker 与 AppKit 的 CFRunLoop 唤醒源及原生性能基准见 [原生后端](06-platform-backends.md)、[渲染性能](07-rendering-and-performance.md) 与 [测试](08-build-docs-and-tests.md)。
