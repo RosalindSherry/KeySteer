@@ -53,6 +53,8 @@ pub enum BackendEvent {
     UiScanned(UiScanResult),
     /// The user asked to quit (tray menu, signal, ...).
     Quit,
+    /// System logout/shutdown checkpoint. Acknowledge after durable workspace save.
+    SaveWorkspace(std::sync::mpsc::Sender<()>),
     /// The user asked to reload the configuration.
     ReloadConfig,
     /// The user asked to edit the active configuration in the web simulator.
@@ -107,6 +109,10 @@ pub enum KeyDisposition {
 /// A native backend. Implementations live in `src/platform/<os>.rs` and are
 /// selected by `cfg(target_os)` in `src/platform/mod.rs`.
 pub trait Backend {
+    /// Optional foreground geometry, queried only when opening a window-centered panel.
+    fn focused_window_bounds(&self) -> Result<Option<super::geometry::Rect>, String> {
+        Ok(None)
+    }
     /// Enqueue audio work; never block the engine on native audio execution.
     fn request_audio(&mut self, _request: super::audio::AudioRequest) -> Result<(), String> {
         Err("Audio control is unavailable on this backend".into())

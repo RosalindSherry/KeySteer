@@ -75,9 +75,10 @@ export function parseConfigDocument(source: string): ParsedConfigDocument {
       }
       if (mode === 'window_editor') throw new Error('window_editor.card 只覆盖位置；其他样式使用 window.card')
       const valid = range ? typeof value === 'number' && Number.isFinite(value) && value >= range[0] && value <= range[1]
-        : ['app_bold', 'title_bold'].includes(key) ? typeof value === 'boolean'
+        : key === 'guide_line_width' ? typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 32
+        : ['app_bold', 'title_bold', 'guide_line_enabled'].includes(key) ? typeof value === 'boolean'
           : ['app_font_family', 'title_font_family'].includes(key) ? typeof value === 'string'
-            : ['app_color', 'title_color', 'background_color', 'border_color', 'number_color'].includes(key) ? (typeof value === 'string' ? /^#[\da-f]{8}$/i.test(value)
+            : ['app_color', 'title_color', 'background_color', 'border_color', 'number_color', 'guide_line_color'].includes(key) ? (typeof value === 'string' ? /^#[\da-f]{8}$/i.test(value)
               : isRecord(value) && Object.entries(value).every(([appearance, color]) => ['light', 'dark'].includes(appearance) && typeof color === 'string' && /^#[\da-f]{8}$/i.test(color))) : false
       if (!valid) throw new Error(`${mode}.card.${key} 配置无效`)
     }

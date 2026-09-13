@@ -1,6 +1,27 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { reactive } from 'vue'
+import { readFile } from 'node:fs/promises'
+
+test('complete shipped defaults load with guide-line settings', async () => {
+  const source = await readFile(new URL('../../../keysteer.default.toml', import.meta.url), 'utf8')
+  const parsed = parseConfigDocument(source).document
+  assert.equal(parsed.window.card.guide_line_enabled, true)
+  assert.equal(parsed.quick_switch.position, 'mouse')
+  assert.equal(parsed.recursive_grid.ui.font_size, 0)
+})
+
+test('usage checkpoint and quick-switch options survive sparse import and export', async () => {
+  const { readFileSync } = await import('node:fs')
+  const { stringify } = await import('smol-toml')
+  const defaults = parseConfigDocument(readFileSync(new URL('../../../keysteer.default.toml', import.meta.url), 'utf8')).document
+  const uploaded = parseConfigDocument('[mode_usage]\nsave_after_entries = 37\n[quick_switch]\nposition = "mouse"\nblacklist = ["idle", "window_tab"]\n[quick_switch.ui]\ntext_color = "#123456FF"').document
+  const effective = resolveConfigDocument(defaults, uploaded)
+  assert.equal(effective.mode_usage.save_after_entries, 37)
+  assert.equal(effective.quick_switch.hold_ms, 350)
+  assert.equal(effective.quick_switch.ui.font_size, 28)
+  assert.deepEqual(parseConfigDocument(stringify(effective)).document, effective)
+})
 
 test('window card defaults and custom styles survive browser export', async () => {
   const { readFileSync } = await import('node:fs')

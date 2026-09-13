@@ -18,6 +18,7 @@ mod key_help;
 mod overlay_coordinator;
 mod plan;
 mod prefix_chords;
+mod quick_switch;
 mod registry;
 mod scheduler;
 mod window_presets;
@@ -25,7 +26,7 @@ pub(crate) use window_presets::PresetRepository;
 
 pub use plan::{
     AppRouteOverride, ConfigurationCandidate, ConfigurationRepository, DebugSettings,
-    EngineSettings, ModeRoute, ModeSpec, PaletteSet, RuntimePlan,
+    EngineSettings, ModeRoute, ModeSpec, PaletteSet, QuickSwitchSettings, RuntimePlan,
 };
 
 #[cfg(test)]
@@ -143,6 +144,7 @@ pub struct Engine {
     should_quit: bool,
     configuration: Option<Box<dyn ConfigurationRepository>>,
     window_presets: window_presets::PresetController,
+    quick_switch: quick_switch::QuickSwitcher,
     /// Prevent rapid status-menu clicks from opening duplicate browser tabs.
     last_config_simulator_open: Option<Instant>,
     started_at: Instant,
@@ -190,6 +192,7 @@ impl Engine {
             should_quit: false,
             configuration: None,
             window_presets: window_presets::PresetController::default(),
+            quick_switch: Default::default(),
             last_config_simulator_open: None,
             started_at: Instant::now(),
         };
@@ -294,6 +297,7 @@ impl Engine {
         capture_lost: bool,
         backend: &mut dyn Backend,
     ) {
+        self.cancel_quick_switch(capture_lost);
         if !self.input_failure_active {
             crate::support::logging::report_error(
                 "input",
@@ -536,6 +540,7 @@ impl Engine {
             }
         }
         let long_press_result = self.fire_due_long_press_toggles(backend);
+        self.fire_quick_switch(backend)?;
         if let Err(error) = long_press_result
             && !self.recover_from_input_error(&error, backend)
         {
@@ -570,6 +575,7 @@ impl Engine {
     ) -> Result<(), String> {
         let mut errors = crate::support::errors::ErrorBundle::default();
         errors.record("runtime", result);
+        errors.record("save mode usage", self.window_presets.store.flush_usage());
         for session in std::mem::take(&mut self.scheduler.audio_sessions).into_keys() {
             backend.cancel_audio_session(session);
         }
@@ -825,6 +831,12 @@ impl Engine {
                 }
             }
             BackendEvent::Quit => self.should_quit = true,
+            BackendEvent::SaveWorkspace(reply) => {
+                if let Err(error) = self.window_presets.store.flush_usage() {
+                    crate::report_error!("mode-usage", "{error}");
+                }
+                let _ = reply.send(());
+            }
             BackendEvent::Warning(message) => {
                 crate::report_warning!("backend", "{message}")
             }
@@ -884,6 +896,7 @@ impl Engine {
         crate::support::logging::set_non_error_enabled(settings.debug.enabled);
         self.input.drag_auto_release.clear();
         self.settings = settings;
+        self.quick_switch.pending = None;
         self.palettes = palettes;
         self.registry.routes = routes;
         self.focused_app_excluded = self.excluded_app_matches(self.focused_app.as_ref());
@@ -937,6 +950,7 @@ impl Engine {
         self.overlay.reset();
 
         self.settings = settings;
+        self.quick_switch.pending = None;
         self.palettes = palettes;
         self.palette = self.palettes.for_appearance(self.appearance);
         self.focused_app_excluded = self.excluded_app_matches(self.focused_app.as_ref());

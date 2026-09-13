@@ -10,6 +10,36 @@ KeySteer 不要求配置文件。没有配置时直接使用内置默认值，�
 想了解动作参数、数组、`exec` 和插件动词等高级配置：请参阅 [模式与动作参考](/reference/modes-and-actions)。
 :::
 
+## 模式统计与快速切换
+
+```toml
+[mode_usage]
+save_after_entries = 100
+
+[quick_switch]
+enabled = true
+key = "q"
+hold_ms = 350
+blacklist = ["idle"]
+position = "mouse" # screen / window / mouse
+
+[quick_switch.ui]
+font_size = 28
+border_width = 1
+border_radius = 6
+padding_x = 6
+padding_y = 8
+# background_color = "#EEF2FFFF"
+# text_color = "#193781FF"
+# border_color = "#506DD0FF"
+```
+
+模式实际切换时累计一次进入记录，重复按键、同模式保持和重启不会增加计数。默认累计 100 次新增记录后后台保存至程序的 `workspace.ksw`；次数必须大于零。保存或删除工作区预设、正常退出时也会保存尚未写入的统计，不增加周期定时器。Windows/macOS 正常系统退出通知会触发保存；突然断电、强制结束或系统退出超时仍可能丢失最近未保存的计数。
+
+在操作模式中单独按住 Q，350 毫秒后显示常用模式面板；按 Q+1…9 可直接选择，无须等待展开。松开 Q 收起，短按 Q 在松开时执行原绑定。Idle、暂停、排除应用及原生备注输入不接管 Q。面板按进入次数排序，同分按模式 id 排序，显示前 9 项；打开后编号固定，选中当前模式保持状态。黑名单只限制此面板，原快捷键仍可进入对应模式。
+
+`screen` 位于鼠标所在屏幕中心，`window` 位于前台窗口中心（没有可用窗口则回退到屏幕中心），`mouse` 位于鼠标模式提示下方；均限制在当前屏幕内。样式还支持 `font_family` 和随浅深主题变化的颜色，加载配置时解析。网页可导入工作区查看统计并编辑保存次数和面板配置，导出保留统计；旧版工作区仍可导入，带统计的 v2 文件需要支持该版本的程序。
+
 ## 配置文件位置
 
 程序会在当前目录中查找 `keysteer.<名称>.toml`：不存在用户配置时，会尝试读取 `keysteer.default.toml`。如果连它也不存在，则直接使用内置默认值：
@@ -261,6 +291,8 @@ after_click = "finish"
 
 ### Recursive Grid
 
+`[recursive_grid.ui]` 的 `font_size = 0`（默认）按格子短边的 40% 自动计算字号，并缩小以适应格子，默认使用常规字重。设为正数（如 `20`）可指定最大字号。
+
 ```toml
 [recursive_grid]
 grid_cols = 3
@@ -472,3 +504,15 @@ window_key_help = false
 Window 的中央编号与分区编号使用 `[window.ui].font_size`，默认 28。分区编号位于窗口中心编号下方；帮助面板优先放在目标窗口内底部，不重复列出数字选窗键。
 
 Quick 的比例尺按 split_ratios 显示原标识，可混用 "1/2"、"1/3"、0.3、0.45；需要保留尾零时写为字符串，如 "0.30"。Actions 下方的屏幕比例预览标注当前宽高，其他比例以细刻度显示；内部矩形实时表示布局。
+
+### 窗口卡片引导线
+
+共享配置适用于 Window 及相关子模式，包括标签避让后产生的引导线。关闭线条不影响避让。
+
+```toml
+[window.card]
+guide_line_enabled = true
+guide_line_width = 3.0 # 0–32；0 也隐藏线条
+# 默认继承卡片边框颜色；末两位是透明度，也支持浅深主题颜色。
+# guide_line_color = "#6E82D680"
+```

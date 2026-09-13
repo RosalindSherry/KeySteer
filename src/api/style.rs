@@ -175,6 +175,9 @@ pub fn resolve(configured: Option<&ThemedColor>, appearance: Appearance, derived
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WindowCardUi {
+    pub guide_line_enabled: bool,
+    pub guide_line_width: f64,
+    pub guide_line_color: Option<ThemedColor>,
     pub position_mode: WindowCardPositionMode,
     /// CSS inset order: top, right, bottom, left. Percentages only.
     pub position: [String; 4],
@@ -202,6 +205,9 @@ pub struct WindowCardUi {
 impl Default for WindowCardUi {
     fn default() -> Self {
         Self {
+            guide_line_enabled: true,
+            guide_line_width: 3.0,
+            guide_line_color: None,
             position_mode: WindowCardPositionMode::Window,
             position: std::array::from_fn(|_| "50%".into()),
             app_font_size: 0.0,
@@ -274,6 +280,47 @@ pub struct LabelUi {
     pub text_color: Option<ThemedColor>,
     pub matched_text_color: Option<ThemedColor>,
     pub border_color: Option<ThemedColor>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuickSwitchPosition {
+    Screen,
+    Window,
+    #[default]
+    Mouse,
+}
+
+/// Precompiled panel, keycap and left-aligned caption styles.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QuickSwitchStyles {
+    pub panel: crate::api::overlay::SharedLabelStyle,
+    pub key: crate::api::overlay::SharedLabelStyle,
+    pub caption: crate::api::overlay::SharedLabelStyle,
+}
+impl QuickSwitchStyles {
+    pub fn new(panel: LabelStyle) -> Self {
+        let mut caption = panel.clone();
+        caption.background = Color::TRANSPARENT;
+        caption.border_width = 0.0;
+        caption.padding_x = 0.0;
+        caption.padding_y = 0.0;
+        caption.text_alignment = crate::api::overlay::TextAlignment::Left;
+        let mut key = caption.clone();
+        key.text_alignment = crate::api::overlay::TextAlignment::Center;
+        key.background = Color::rgb(235, 237, 242);
+        key.text_color = Color::rgb(30, 34, 43);
+        key.border_color = Color::rgb(196, 201, 211);
+        key.border_width = 1.0;
+        key.border_radius = 3.0;
+        key.padding_y = 1.0;
+        caption.bold = false;
+        Self {
+            panel: panel.into(),
+            key: key.into(),
+            caption: caption.into(),
+        }
+    }
 }
 
 impl Default for LabelUi {
@@ -718,6 +765,7 @@ pub struct WindowCardMetrics {
 
 #[derive(Debug)]
 pub struct ResolvedWindowStyle {
+    pub guide_line: crate::api::overlay::LabelConnectorStyle,
     pub base: SharedLabelStyle,
     pub number: SharedLabelStyle,
     pub background: SharedLabelStyle,
@@ -917,6 +965,15 @@ impl ResolvedWindowStyle {
         }
         .into();
         Self {
+            guide_line: crate::api::overlay::LabelConnectorStyle {
+                enabled: card.guide_line_enabled && card.guide_line_width > 0.0,
+                width: card.guide_line_width,
+                color: resolve(
+                    card.guide_line_color.as_ref(),
+                    palette.appearance,
+                    style.border_color,
+                ),
+            },
             base,
             number: style,
             background,

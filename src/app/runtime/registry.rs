@@ -306,6 +306,9 @@ impl Engine {
             self.overlay.window_help_override = None;
         }
         if active != self.registry.active {
+            self.window_presets
+                .store
+                .record_mode_entry(active.as_str(), self.settings.usage_save_after_entries);
             // Activation keys belong to the outgoing input context. A fresh
             // physical press arms the destination's temporary layer.
             self.input.temporary_entry_keys.clear();
@@ -450,7 +453,13 @@ impl Engine {
     }
 
     pub(super) fn sync_character_bindings(&self, backend: &mut dyn Backend) {
-        let keys: Vec<_> = self.registry.character_keys.values().cloned().collect();
+        let mut keys: Vec<_> = self.registry.character_keys.values().cloned().collect();
+        if self.settings.quick_switch.enabled
+            && self.settings.quick_switch.key.as_char().is_some()
+            && !keys.contains(&self.settings.quick_switch.key)
+        {
+            keys.push(self.settings.quick_switch.key.clone());
+        }
         backend.set_character_bindings(&keys);
     }
 

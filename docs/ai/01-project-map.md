@@ -1,5 +1,7 @@
 # 项目目录与代码地图
 
+`app/runtime/quick_switch.rs` 负责操作模式中的长按／数字选择、固定排名快照及按键消费配对；`presentation/quick_switch.rs` 只使用 API 数据绘制面板。`app/preset_store/usage.rs` 负责有界 mailbox、事件触发 checkpoint 和后台 writer 生命周期。原生后端仅提供窗口几何和系统退出通知。
+
 ## 顶层目录
 
 ```text

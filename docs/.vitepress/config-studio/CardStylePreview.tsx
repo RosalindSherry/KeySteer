@@ -25,6 +25,8 @@ export default defineComponent({
       return <div class="ks-card-style-preview">
         <div class="ks-card-preview-caption"><strong>卡片外观 · 实时预览</strong><span>位置范围共用；编号字号和边框尺寸使用当前模式的 ui。</span></div>
         <div class="ks-card-preview-stage">
+          {card.guide_line_enabled !== false && <div style={{ width: '70px', margin: '0 auto 8px',
+            borderTop: `${card.guide_line_width ?? 3}px solid ${color(card.guide_line_color, border)}` }} />}
           <div class="ks-card-preview-sample" style={{ border: line, borderRadius: `${radius}px`,
             background: color(card.background_color, color(ui.background_color, color(theme.surface, props.appearance === 'dark' ? '#0A1338FF' : '#EEF2FFFF'))),
             minHeight: `${card.min_height ?? 44}px`, fontFamily: ui.font_family || 'var(--vp-font-family-base)' }}>

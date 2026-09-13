@@ -31,6 +31,19 @@ pub struct EngineSettings {
     pub ui_hint_overlap_key: String,
     pub mode_indicator: ModeIndicator,
     pub key_help: crate::api::style::KeyHelp,
+    pub usage_save_after_entries: u32,
+    pub quick_switch: QuickSwitchSettings,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct QuickSwitchSettings {
+    pub enabled: bool,
+    pub key: crate::api::Key,
+    pub hold_ms: u64,
+    pub blacklist: Vec<String>,
+    pub position: crate::api::style::QuickSwitchPosition,
+    pub light: crate::api::style::QuickSwitchStyles,
+    pub dark: crate::api::style::QuickSwitchStyles,
 }
 
 #[derive(Debug, Clone, PartialEq)]

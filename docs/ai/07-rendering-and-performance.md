@@ -1,5 +1,11 @@
 # 覆盖层、帧同步与性能约束
 
+窗口身份卡片的引导线由共享 `window.card.guide_line_enabled/width/color` 控制；颜色在 WindowStyles 中按主题预编译。背景标签携带可选 LabelConnectorStyle，统一避让创建连接线时也遵循开关和样式；关闭线条不影响避让。未设置连接样式的其他标注保留原行为。
+
+快速切换面板按当前屏幕比例统一计算行距和列宽，标签矩形补偿原生 compact-label 的居中缩放，防止逐行独立放大造成重叠。数字沿用 Key Help 的灰色键帽，名称保持透明无边框；Windows DPI 缩放保留零宽边框，不将其强制变为一像素。
+
+快速切换面板由 `presentation/quick_switch.rs` 构建，使用配置编译好的浅深主题 SharedLabelStyle。数字使用独立按键框，名称列左对齐；默认字号 28、左右内边距各 10。面板／按键／名称三份样式在配置加载时编译，排名和各行文本只在打开时生成；鼠标移动时复用文本／样式，原生渲染器继续复用窗口和缓冲。仅长按候选复用现有 scheduler deadline，模式计数写入没有周期 timer，也不会进入窗口几何跟随路径。
+
 Window 卡片、区域编号（`1、`2）和组编号（~1、~2）统一由 `presentation/label_placement.rs` 按屏幕避让。`OverlayLabel::placement` 显式记录组身份与 Background/Fixed/Flexible/Standalone 角色，引线也带同一组身份，不依赖 z_index 或数组相邻顺序。key_help 得到最终物理面板矩形后调用同一算法，完整移动背景、编号、应用名、标题及引线。先寻找最近空位，空间碎片不足时按可用空区重新排列；仅收窄 Flexible 标题并省略文字，固定编号与字号保持。实际 footprint 使用对应后端 DPI 几何。该工作仅发生在场景生成／帮助缓存失效时，不进入鼠标位置缓存命中路径。
 
 ## 统一场景构建

@@ -1,4 +1,5 @@
 import { cardPositionRatios, packedCardCenters } from '../simulator/window-card-position.ts'
+import QuickSwitchPreview from '../config-studio/QuickSwitchPreview'
 import { computed, defineComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { withBase } from 'vitepress'
 import { stringify } from 'smol-toml'
@@ -12,7 +13,7 @@ import {
 } from '../simulator/state'
 import { effectiveBindings, resolveBinding, resolvePhysicalBinding, shortcutCaption, temporaryPhysicalKeys } from '../simulator/bindings'
 import { applyWindowAction, chooseWindowNumber, switchWindowMode, isWindowMode, finishWindowNumber, hasWindowPresetChanges, replaceWindowPresets, restoreWindowPreset, saveWindowPreset, setDemoWindowCount, temporaryWindow, windowActionAvailable, windowDetail, windowInputStatus, windowSelectionKey, windowTarget, WINDOW_AREA, WINDOW_MOTION } from '../simulator/window'
-import { decodeWorkspaceFile, encodeWorkspaceFile, WORKSPACE_FILE_NAME, WORKSPACE_STORAGE_KEY, readSavedPresets, presetName } from '../simulator/window-presets'
+import { decodeWorkspaceDocument, encodeWorkspaceFile, WORKSPACE_FILE_NAME, WORKSPACE_STORAGE_KEY, readSavedPresets, presetName, type ModeUsage } from '../simulator/window-presets'
 import type { WindowState } from '../simulator/window'
 import { availableWindowPresets } from '../simulator/window'
 import { activateTab, chooseTabTarget, containingTab, activeTabWindow, tabFrame } from '../simulator/window-tabs'
@@ -213,9 +214,30 @@ export default defineComponent({
     const layoutNoteInput = ref<HTMLInputElement>()
     const layoutStorageError = ref('')
     const layoutFileInput = ref<HTMLInputElement>()
+    const modeUsage = ref<ModeUsage>({})
+    const quickVisible = ref(false)
+    const quickRows = ref<string[]>([])
+    let quickStarted = 0
+    let quickUsed = false
+    const quickCandidates = computed(() => modes.map(mode => mode.id).filter(mode => mode !== 'hotkeys' && mode !== simulator.mode && effectiveDocument.value?.[mode]?.enabled !== false && !(effectiveDocument.value?.quick_switch?.blacklist ?? ['idle']).includes(mode)).sort((a, b) => {
+      const x = BigInt(modeUsage.value[a] ?? '0'), y = BigInt(modeUsage.value[b] ?? '0')
+      return x === y ? a.localeCompare(b) : x > y ? -1 : 1
+    }).slice(0, 9))
+    function previewQuickSwitch(): void {
+      quickRows.value = [...quickCandidates.value]; quickVisible.value = true
+      screen.value?.focus()
+    }
+    function chooseQuickMode(mode: string): void {
+      quickUsed = true; quickVisible.value = false
+      if (mode !== simulator.mode) setPreviewMode(mode as Exclude<EditorMode, 'hotkeys'>)
+    }
+    const usageRanking = computed(() => Object.entries(modeUsage.value).sort(([a, x], [b, y]) => BigInt(x) === BigInt(y) ? a.localeCompare(b) : BigInt(x) > BigInt(y) ? -1 : 1))
     function persistLayoutLibrary(): void {
       if (layoutStorageError.value) return
-      try { localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(simulator.window.presets)) }
+      try {
+        localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(simulator.window.presets))
+        localStorage.setItem(`${WORKSPACE_STORAGE_KEY}.usage`, JSON.stringify(modeUsage.value))
+      }
       catch (error) { simulator.lastEvent = `浏览器无法保留布局，请下载文件：${formatError(error)}` }
     }
     async function importLayoutFile(event: Event): Promise<void> {
@@ -223,7 +245,9 @@ export default defineComponent({
       if (!file) return
       try {
         if (file.size > 1024 * 1024) throw new Error('工作区文件超过 1 MiB')
-        const layouts = decodeWorkspaceFile(new Uint8Array(await file.arrayBuffer()))
+        const workspace = decodeWorkspaceDocument(new Uint8Array(await file.arrayBuffer()))
+        const layouts = workspace.presets
+        modeUsage.value = workspace.usage
         replaceWindowPresets(simulator, layouts); layoutStorageError.value = ''; persistLayoutLibrary()
         switchWindowMode(simulator, 'window_restore', effectiveDocument.value?.window_restore ?? {}); simulator.lastEvent = `已导入 ${layouts.length} 个预设`
       } catch (error) { simulator.lastEvent = `导入失败：${formatError(error)}` }
@@ -235,7 +259,7 @@ export default defineComponent({
           const note = simulator.window.presets.find(p => p.id === simulator.window.editingPresetId)?.note ?? ''
           saveWindowPreset(simulator, note); persistLayoutLibrary()
         }
-        downloadLayoutBinary(encodeWorkspaceFile(simulator.window.presets))
+        downloadLayoutBinary(encodeWorkspaceFile(simulator.window.presets, modeUsage.value))
         simulator.lastEvent = '已下载 workspace.ksw · 替换程序同名文件后，按 R 重新读取'
       } catch (error) { simulator.lastEvent = `下载失败：${formatError(error)}` }
     }
@@ -342,6 +366,7 @@ export default defineComponent({
             '已从 KeySteer 导入当前配置；数据仅在本机浏览器中处理',
           )
           if (result.presets !== undefined) {
+            modeUsage.value = result.usage ?? {}
             replaceWindowPresets(simulator, result.presets); layoutStorageError.value = ''; persistLayoutLibrary()
             setPreviewMode('window_restore')
             message.value = `已从 KeySteer 同时导入按键配置和 ${result.presets.length} 个预设`
@@ -477,6 +502,25 @@ export default defineComponent({
     function onSimulatorKeyDown(event: KeyboardEvent): void {
       if (simulator.window.noteOpen) return
       if (!simulatorArmed.value) return
+      const quickKey = String(effectiveDocument.value?.quick_switch?.key ?? 'q')
+      if (quickStarted && !event.repeat && /^[1-9]$/.test(event.key)) {
+        event.preventDefault()
+        quickUsed = true
+        const mode = quickRows.value[Number(event.key) - 1]
+        if (mode) chooseQuickMode(mode)
+        return
+      }
+      if (simulator.mode !== 'idle' && effectiveDocument.value?.quick_switch?.enabled !== false && event.key.toLowerCase() === quickKey && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey) {
+        event.preventDefault()
+        if (!event.repeat) { quickStarted = performance.now(); quickUsed = false; quickRows.value = [...quickCandidates.value] }
+        return
+      }
+      if (quickVisible.value) {
+        event.preventDefault()
+        if (event.key === 'Escape') { quickVisible.value = false; quickUsed = true }
+        else if (/^[1-9]$/.test(event.key)) { const mode = quickRows.value[Number(event.key) - 1]; if (mode) chooseQuickMode(mode) }
+        return
+      }
       if (event.repeat) {
         const document = effectiveDocument.value
         if (document && isWindowMode(simulator.mode)) {
@@ -586,6 +630,13 @@ export default defineComponent({
       temporaryWindow(simulator.window, active, effectiveDocument.value[simulator.mode] ?? {})
     }
     function onSimulatorKeyUp(event: KeyboardEvent): void {
+      if (quickStarted && event.key.toLowerCase() === String(effectiveDocument.value?.quick_switch?.key ?? 'q')) {
+        event.preventDefault()
+        const shortPress = !quickVisible.value && !quickUsed
+        quickStarted = 0; quickVisible.value = false
+        if (shortPress && !handleTargetingKey(event.key)) resolveAction(event.key).forEach(action => executeAction(action))
+        return
+      }
       physicalKeys.delete(physicalKey(event))
       temporaryEntryKeys.delete(physicalKey(event))
       updateTemporaryWindow(event)
@@ -603,6 +654,7 @@ export default defineComponent({
     function animate(timestamp: number): void {
       const delta = previousFrame ? Math.min(32, timestamp - previousFrame) : 16
       previousFrame = timestamp
+      if (quickStarted && !quickUsed && timestamp - quickStarted >= Number(effectiveDocument.value?.quick_switch?.hold_ms ?? 350)) quickVisible.value = true
       heldActions.forEach((action) => {
         if (WINDOW_MOTION.has(action)) applyWindowAction(simulator, action, effectiveDocument.value?.[simulator.mode] ?? {}, Date.now(), delta / 1000)
         else movePointer(simulator, action, delta * 0.028)
@@ -641,6 +693,13 @@ export default defineComponent({
       isMac.value = /Mac|iPhone|iPad/.test(navigator.platform)
       try { simulator.window.presets = readSavedPresets(localStorage.getItem(WORKSPACE_STORAGE_KEY)) }
       catch (error) { layoutStorageError.value = formatError(error) }
+      try {
+        const saved = localStorage.getItem(`${WORKSPACE_STORAGE_KEY}.usage`)
+        if (saved && saved.length <= 65536) {
+          const usage = JSON.parse(saved)
+          modeUsage.value = decodeWorkspaceDocument(encodeWorkspaceFile([], usage)).usage
+        }
+      } catch (error) { layoutStorageError.value = formatError(error) }
       void initialize()
       animationFrame = requestAnimationFrame(animate)
     })
@@ -751,7 +810,7 @@ export default defineComponent({
                 style={targetingVisual.value as any}
                 tabindex="0"
                 onFocus={() => { simulatorArmed.value = true }}
-                onBlur={() => { simulatorArmed.value = false; heldActions.clear(); heldCharacterActions.clear(); physicalKeys.clear(); temporaryEntryKeys.clear(); temporaryWindow(simulator.window, false) }}
+                onBlur={() => { quickStarted = 0; quickVisible.value = false; simulatorArmed.value = false; heldActions.clear(); heldCharacterActions.clear(); physicalKeys.clear(); temporaryEntryKeys.clear(); temporaryWindow(simulator.window, false) }}
                 onKeydown={onSimulatorKeyDown}
                 onKeyup={onSimulatorKeyUp}
               >
@@ -803,6 +862,7 @@ export default defineComponent({
                   <div class="ks-layout-note-heading"><strong>{simulator.window.editingPresetId === null ? 'Save preset' : `Update preset ${simulator.window.editingPresetId}`}</strong><span>备注可留空，将自动命名</span></div>
                   <div class="ks-layout-note-row"><input aria-label="备注（可留空）" ref={layoutNoteInput} value={layoutNote.value} onInput={e => layoutNote.value = (e.target as HTMLInputElement).value} placeholder="例如：写代码 / 阅读" /><button type="submit">Save</button><button type="button" onClick={() => finishLayoutNote(false)}>Cancel</button></div>
                 </form></div>}
+                {quickVisible.value && <QuickSwitchPreview rows={quickRows.value} settings={effectiveDocument.value?.quick_switch ?? {}} appearance={appearance.value} pointer={simulator.pointer} windowCenter={(() => { const w = simulator.window.windows.find(w => w.id === simulator.window.target); return w ? { x: (w.x + w.width / 2) / WINDOW_AREA.width * 100, y: (w.y + w.height / 2) / WINDOW_AREA.height * 100 } : { x: 50, y: 50 } })()} onSelect={chooseQuickMode} />}
                 {(simulator.mode === 'grid' || simulator.mode === 'recursive_grid') && <div class="ks-target-backdrop" />}
                 {simulator.mode === 'grid' && <TargetGrid mode="grid" settings={targetingSettings.value} path={simulator.targeting.grid.path} />}
                 {simulator.mode === 'recursive_grid' && <TargetGrid mode="recursive_grid" settings={targetingSettings.value} path={simulator.targeting.recursiveGrid.path} />}
@@ -871,6 +931,54 @@ export default defineComponent({
               <p>页面构建前会从仓库根目录复制 <code>keysteer.default.toml</code>。导入局部配置时，预览按 Rust 缺省规则补全，下载仍保持局部文件。</p>
               <small>浏览器会验证 TOML 结构，但不会替代 <code>keysteer --check</code>；解析后注释不会保留。</small>
             </div>
+            <details class="ks-toml-details ks-quick-settings" open>
+              <summary>快速模式切换</summary>
+              <div class="ks-settings-body">
+              <p>操作模式中长按 {String(effectiveDocument.value?.quick_switch?.key ?? 'q').toUpperCase()} 展开，配合 1…9 选择；松开收起。Idle 不接管，黑名单仅限制快速切换。</p>
+              <button class="ks-button" disabled={!document.value} onClick={previewQuickSwitch}>在模拟器中预览</button>
+              <div class="ks-settings-grid">
+              <label>触发键<input value={effectiveDocument.value?.quick_switch?.key ?? 'q'} onChange={event => {
+                const value = (event.target as HTMLInputElement).value.trim().toLowerCase()
+                if (document.value && /^[a-z]$/.test(value)) { document.value.quick_switch ??= {}; document.value.quick_switch.key = value }
+              }} /></label>
+              <label>启用 <input type="checkbox" checked={effectiveDocument.value?.quick_switch?.enabled !== false}
+                onChange={event => { if (document.value) { document.value.quick_switch ??= {}; document.value.quick_switch.enabled = (event.target as HTMLInputElement).checked } }} /></label>
+              <label>长按毫秒 <input type="number" min="1" max="10000" value={effectiveDocument.value?.quick_switch?.hold_ms ?? 350}
+                onChange={event => { const value = Number((event.target as HTMLInputElement).value); if (document.value && value >= 1 && value <= 10000 && Number.isInteger(value)) { document.value.quick_switch ??= {}; document.value.quick_switch.hold_ms = value } }} /></label>
+              <label>位置 <select value={effectiveDocument.value?.quick_switch?.position ?? 'mouse'} onChange={event => {
+                if (document.value) { document.value.quick_switch ??= {}; document.value.quick_switch.position = (event.target as HTMLSelectElement).value }
+              }}><option value="screen">当前屏幕中心</option><option value="window">当前窗口中心</option><option value="mouse">鼠标模式提示下方</option></select></label>
+              <label>面板黑名单（逗号分隔）<input value={(effectiveDocument.value?.quick_switch?.blacklist ?? ['idle']).join(', ')}
+                onChange={event => { if (document.value) { document.value.quick_switch ??= {}; document.value.quick_switch.blacklist = (event.target as HTMLInputElement).value.split(',').map(value => value.trim()).filter(Boolean) } }} /></label>
+              {(['font_size', 'border_width', 'border_radius', 'padding_x', 'padding_y'] as const).map(field => <label key={field}>{{ font_size: '字号', border_width: '边框宽度', border_radius: '圆角（-1 自动）', padding_x: '左右内边距', padding_y: '上下内边距' }[field]}
+                <input type="number" min={field === 'font_size' ? 1 : field === 'border_width' ? 0 : -1} max="200"
+                  value={effectiveDocument.value?.quick_switch?.ui?.[field] ?? (field === 'font_size' ? 28 : field === 'border_width' ? 1 : field === 'padding_x' ? 10 : -1)}
+                  onChange={event => { const value = Number((event.target as HTMLInputElement).value); if (document.value && Number.isInteger(value)) { document.value.quick_switch ??= {}; document.value.quick_switch.ui ??= {}; document.value.quick_switch.ui[field] = value } }} />
+              </label>)}
+              {(['background_color', 'text_color', 'border_color'] as const).map(field => <label key={field}>{{ background_color: '背景颜色', text_color: '文字颜色', border_color: '边框颜色' }[field]}
+                <input placeholder="#RRGGBBAA · 留空继承主题" value={typeof effectiveDocument.value?.quick_switch?.ui?.[field] === 'string' ? effectiveDocument.value.quick_switch.ui[field] : ''}
+                  onChange={event => { const value = (event.target as HTMLInputElement).value.trim(); if (document.value && (!value || /^#[0-9a-f]{8}$/i.test(value))) { document.value.quick_switch ??= {}; document.value.quick_switch.ui ??= {}; if (value) document.value.quick_switch.ui[field] = value; else delete document.value.quick_switch.ui[field] } }} />
+              </label>)}
+              </div></div>
+            </details>
+            <details class="ks-toml-details ks-usage-settings" open>
+              <summary>模式使用统计 · {usageRanking.value.length} 个模式</summary>
+              <div class="ks-settings-body">
+              <p>来自导入的 workspace.ksw，按进入次数排序；模拟操作不会改变实际使用统计。</p>
+              <label>累计进入次数后保存 <input type="number" min="1" max="4294967295"
+                value={Number(effectiveDocument.value?.mode_usage?.save_after_entries ?? 100)}
+                onChange={(event) => {
+                  const count = Number((event.target as HTMLInputElement).value)
+                  if (document.value && Number.isInteger(count) && count >= 1 && count <= 4294967295) {
+                    document.value.mode_usage = { save_after_entries: count }
+                  }
+                }} /></label>
+              {!usageRanking.value.length && <div class="ks-usage-empty"><strong>暂无使用记录</strong><span>导入 workspace.ksw 后，在这里查看常用模式排名。</span></div>}
+              <table class="ks-usage-table" hidden={!usageRanking.value.length}><thead><tr><th>常用模式</th><th>进入次数</th></tr></thead><tbody>
+                {usageRanking.value.map(([mode, count], index) => <tr key={mode}><td><span class="ks-usage-rank">{index + 1}</span>{mode}<progress max="100" value={Number(BigInt(count) * 100n / (BigInt(usageRanking.value[0]?.[1] ?? '1') || 1n))} /></td><td>{BigInt(count).toLocaleString()}</td></tr>)}
+              </tbody></table>
+              </div>
+            </details>
             <details class="ks-toml-details">
               <summary>查看并检查生成的 TOML</summary>
               <pre class="ks-toml"><code innerHTML={highlightToml(tomlPreview.value)} /></pre>
@@ -911,6 +1019,7 @@ const TargetGrid = defineComponent({
           class={{
             'ks-target-grid': true,
             recursive: props.mode === 'recursive_grid',
+            'auto-font': props.mode === 'recursive_grid' && Number(props.settings.ui?.font_size ?? 0) === 0,
             'with-second-layer-preview': previewSecondLayer,
           }}
           style={{

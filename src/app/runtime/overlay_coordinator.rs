@@ -212,6 +212,7 @@ impl Engine {
                 Screen::containing(&self.screens, &self.cursor).map(|screen| screen.bounds);
         }
         self.decorate_key_help(&mut scene);
+        self.decorate_quick_switch(&mut scene);
         let trace_overlay = if cursor_only {
             self.settings.debug.motion
         } else {
@@ -316,6 +317,14 @@ impl Engine {
         &mut self,
         backend: &mut dyn Backend,
     ) -> Result<(), String> {
+        if self
+            .quick_switch
+            .pending
+            .as_ref()
+            .is_some_and(|p| p.visible)
+        {
+            return self.refresh_overlay(backend);
+        }
         if self.registry.active == ModeId::idle() || !self.overlay.visible {
             return Ok(());
         }

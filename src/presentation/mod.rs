@@ -7,6 +7,7 @@ pub(crate) mod grid;
 pub(crate) mod hint;
 pub(crate) mod key_help;
 pub(crate) mod label_placement;
+pub(crate) mod quick_switch;
 pub(crate) mod recursive_grid;
 pub(crate) mod screen_selector;
 pub(crate) mod window;

@@ -105,7 +105,7 @@ const fields = {
       { path: 'recursive_grid.grid_cols', label: '列数', kind: 'number', min: 1, max: 8, step: 1 },
       { path: 'recursive_grid.grid_rows', label: '行数', kind: 'number', min: 1, max: 8, step: 1 },
       { path: 'recursive_grid.keys', label: '网格键', kind: 'text' },
-      { path: 'recursive_grid.ui.font_size', label: '大字母字号', kind: 'number', min: 6, max: 72, step: 1 },
+      { path: 'recursive_grid.ui.font_size', label: '大字母字号（0 自动）', kind: 'number', min: 0, max: 200, step: 1 },
       { path: 'recursive_grid.ui.sub_key_preview_font_size', label: '小字母字号', kind: 'number', min: 4, max: 24, step: 1 },
     ],
     advanced: [
@@ -148,6 +148,9 @@ const fields = {
 fields.window.layout.push({ path: 'window.card.position_mode', label: '卡片定位（window 窗口 / screen 当前屏幕）', kind: 'select', options: ['window', 'screen'] })
 fields.window.layout.push({ path: 'window.card.position', label: '上、右、下、左（四个百分比，逗号分隔）', kind: 'percentages' })
 fields.window.colors.push({ path: 'window.card.border_color', label: '卡片边框颜色', kind: 'color' })
+fields.window.colors.push({ path: 'window.card.guide_line_color', label: '引导线颜色（含透明度）', kind: 'color' })
+fields.window.layout.push({ path: 'window.card.guide_line_enabled', label: '显示引导线', kind: 'boolean' })
+fields.window.layout.push({ path: 'window.card.guide_line_width', label: '引导线宽度', kind: 'number', min: 0, max: 32, step: 0.5 })
 fields.window.colors.push({ path: 'window.card.background_color', label: '卡片背景', kind: 'color' })
 fields.window.colors.push({ path: 'window.card.number_color', label: '编号文字', kind: 'color' })
 fields.window.colors.push({ path: 'window.card.app_color', label: '程序名颜色', kind: 'color' })

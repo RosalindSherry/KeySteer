@@ -1,5 +1,11 @@
 # Release notes
 
+## 0.10.6
+
+- Added quick switching by mode usage: hold `Q` in an operating mode and press a number to switch, with usage statistics, a blacklist, and configurable panel styling.
+- Fixed overlapping text and unwanted borders in the quick-switch panel at high DPI; Recursive Grid now uses large automatic font sizing by default.
+- Added window card guide-line visibility, width, color, and opacity settings, also available in the web editor.
+
 ## 0.10.5
 
 - Split window maximization and minimization into separate toggles: `F` maximizes/restores, while `Shift+F` minimizes/restores, replacing the three-state cycle. Both shortcuts remain on one help row.

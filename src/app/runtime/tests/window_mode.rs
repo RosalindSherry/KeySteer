@@ -547,6 +547,7 @@ fn window_exit_cancels_and_late_results_cannot_warp_pointer() {
     let (mut engine, mut backend, log) = window_test_engine(&Config::default());
     let request = enter_window(&mut engine, &mut backend, &log);
     engine.handle_backend_event(key_down("q"), &mut backend).unwrap();
+    engine.handle_backend_event(key_up("q"), &mut backend).unwrap();
     assert_eq!(engine.active_mode(), &ModeId::idle());
     assert!(log.lock().unwrap().cancelled_window_sessions.contains(&request.session));
     let before = log.lock().unwrap().warps.len();

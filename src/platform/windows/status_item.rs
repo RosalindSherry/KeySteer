@@ -850,6 +850,22 @@ extern "system" fn window_proc(
         return LRESULT(0);
     }
     match message {
+        windows::Win32::UI::WindowsAndMessaging::WM_QUERYENDSESSION => {
+            let (reply, saved) = std::sync::mpsc::channel();
+            emit(BackendEvent::SaveWorkspace(reply));
+            // Only the tray callback waits during system logout, never an input callback.
+            if saved.recv_timeout(Duration::from_secs(3)).is_err() {
+                crate::report_error!(
+                    "mode-usage",
+                    "Shutdown workspace checkpoint was not acknowledged"
+                );
+            }
+            LRESULT(1)
+        }
+        windows::Win32::UI::WindowsAndMessaging::WM_ENDSESSION if wparam.0 != 0 => {
+            emit(BackendEvent::Quit);
+            LRESULT(0)
+        }
         super::text_prompt::MESSAGE => {
             super::text_prompt::process();
             LRESULT(0)

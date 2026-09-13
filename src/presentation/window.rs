@@ -231,15 +231,16 @@ impl WindowView<'_> {
                 (rows as f64 * row_height + card_config.padding_y * 2.0).max(height) * scale,
             );
 
-            if self.tree.is_none()
+            if resolved.guide_line.enabled
+                && self.tree.is_none()
                 && ((card.center().x - window.bounds.center().x).abs() > 5.0
                     || (card.center().y - window.bounds.center().y).abs() > height * scale)
             {
                 scene.push_shape(OverlayShape::label_connector(
                     window.bounds.center(),
                     card.center(),
-                    style.border_color,
-                    3.0 * scale,
+                    resolved.guide_line.color,
+                    resolved.guide_line.width * scale,
                     group,
                 ));
             }
@@ -248,6 +249,9 @@ impl WindowView<'_> {
                     .with_z_index(19)
                     .with_placement(group, Role::Background),
             );
+            if let Some(background) = scene.labels.last_mut() {
+                background.connector = Some(resolved.guide_line);
+            }
             let number_rect = Rect::new(card.x, card.y, number_width * scale, card.height);
             scene.push_label(
                 OverlayLabel::new(text, logical(number_rect, scale), style.clone())

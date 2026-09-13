@@ -441,6 +441,13 @@ pub struct LabelPlacement {
     pub role: LabelPlacementRole,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct LabelConnectorStyle {
+    pub enabled: bool,
+    pub width: f64,
+    pub color: Color,
+}
+
 /// A text label to draw — a hint code, a grid cell key, a status badge.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OverlayLabel {
@@ -457,6 +464,8 @@ pub struct OverlayLabel {
     pub fit_to_text: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub placement: Option<LabelPlacement>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connector: Option<LabelConnectorStyle>,
 }
 
 impl OverlayLabel {
@@ -473,6 +482,7 @@ impl OverlayLabel {
             z_index: 0,
             fit_to_text: false,
             placement: None,
+            connector: None,
         }
     }
 

@@ -3,7 +3,7 @@ import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import { createSimulatorState, applyModeAction } from './state.ts'
 import { applyWindowAction, enterWindow, saveWindowPreset, restoreWindowPreset, windowSelectionKey } from './window.ts'
-import { decodeWorkspaceFile, encodeWorkspaceFile, instantiateLayout, readSavedPresets, presetName } from './window-presets.ts'
+import { decodeWorkspaceFile, decodeWorkspaceDocument, encodeWorkspaceFile, instantiateLayout, readSavedPresets, presetName } from './window-presets.ts'
 import type { RegionTemplate, SavedWindowPreset } from './window-presets.ts'
 import { treeSlots } from './window-layout.ts'
 
@@ -19,6 +19,23 @@ test('native binary fixture roundtrips byte for byte and rejects truncation', ()
   assert.equal(layouts[0].note, 'Code · 阅读'); assert.equal(layouts.at(-1)!.id, 12)
   assert.deepEqual(encodeWorkspaceFile(layouts), file)
   for (let length = 0; length < file.length; length++) assert.throws(() => decodeWorkspaceFile(file.subarray(0, length)))
+})
+
+test('workspace v2 preserves full u64 usage counters alongside edited presets', () => {
+  const native = new Uint8Array(readFileSync(new URL('../../../tests/fixtures/workspace-usage.ksw', import.meta.url)))
+  const nativeDocument = decodeWorkspaceDocument(native)
+  assert.deepEqual(encodeWorkspaceFile(nativeDocument.presets, nativeDocument.usage), native)
+  const presets = [preset(3)], usage = { normal: '18446744073709551615', window: '125' }
+  const file = encodeWorkspaceFile(presets, usage)
+  assert.equal(file[8], 2)
+  const decoded = decodeWorkspaceDocument(file)
+  assert.deepEqual(decoded.presets, presets)
+  assert.deepEqual({ ...decoded.usage }, usage)
+  assert.deepEqual(encodeWorkspaceFile(decoded.presets, decoded.usage), file)
+  for (let length = 0; length < file.length; length++) assert.throws(() => decodeWorkspaceDocument(file.subarray(0, length)))
+  assert.throws(() => encodeWorkspaceFile([], { normal: '18446744073709551616' }))
+  assert.throws(() => encodeWorkspaceFile([], { '': '1' }))
+  assert.equal(decodeWorkspaceDocument(encodeWorkspaceFile([], usage)).usage.normal, usage.normal)
 })
 test('editing an imported layout updates its number and keeps other layouts unchanged', () => {
   const layouts = decodeWorkspaceFile(new Uint8Array(readFileSync(new URL('../../../tests/fixtures/workspace.ksw', import.meta.url))))

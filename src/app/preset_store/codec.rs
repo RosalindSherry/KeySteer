@@ -4,6 +4,28 @@ use crate::api::window_presets::{
     MAX_NOTE_CHARS, MAX_PRESETS, RegionTemplate, SavedPreset, TabTemplate, WindowTemplate,
 };
 const HEADER: &[u8; 9] = b"KSWORKSP\x01";
+pub(super) type Usage = std::collections::BTreeMap<String, u64>;
+
+pub(super) fn encode_workspace(layouts: &[SavedPreset], usage: &Usage) -> Result<Vec<u8>, String> {
+    let mut bytes = encode(layouts)?;
+    if usage.is_empty() {
+        return Ok(bytes);
+    }
+    if usage.len() > 256 {
+        return Err("Too many mode usage records".into());
+    }
+    bytes[8] = 2;
+    bytes.extend((usage.len() as u16).to_le_bytes());
+    for (mode, count) in usage {
+        if mode.is_empty() || mode.len() > 255 {
+            return Err("Invalid mode usage name".into());
+        }
+        bytes.push(mode.len() as u8);
+        bytes.extend(mode.as_bytes());
+        bytes.extend(count.to_le_bytes());
+    }
+    Ok(bytes)
+}
 
 pub(super) fn encode(layouts: &[SavedPreset]) -> Result<Vec<u8>, String> {
     if layouts.len() > MAX_PRESETS {
@@ -102,13 +124,17 @@ impl<'a> Reader<'a> {
         }
     }
 }
+#[cfg(test)]
 pub(super) fn decode(bytes: &[u8]) -> Result<Vec<SavedPreset>, String> {
+    decode_workspace(bytes).map(|(layouts, _)| layouts)
+}
+pub(super) fn decode_workspace(bytes: &[u8]) -> Result<(Vec<SavedPreset>, Usage), String> {
     let mut reader = Reader { bytes };
     if reader.take(8)? != &HEADER[..8] {
         return Err("Unsupported saved presets file".into());
     }
     let version = reader.byte()?;
-    if version != 1 {
+    if version != 1 && version != 2 {
         return Err("Unsupported saved presets file".into());
     }
     let count = reader.byte()? as usize;
@@ -155,16 +181,52 @@ pub(super) fn decode(bytes: &[u8]) -> Result<Vec<SavedPreset>, String> {
         }
         layouts.push(layout);
     }
+    let mut usage = Usage::new();
+    if version == 2 {
+        let count = u16::from_le_bytes(reader.fixed()?) as usize;
+        if count > 256 {
+            return Err("Too many mode usage records".into());
+        }
+        for _ in 0..count {
+            let length = reader.byte()? as usize;
+            let mode = std::str::from_utf8(reader.take(length)?)
+                .map_err(|_| "Invalid mode usage name")?
+                .to_owned();
+            let entries = u64::from_le_bytes(reader.fixed()?);
+            if mode.is_empty() || usage.insert(mode, entries).is_some() {
+                return Err("Invalid or duplicate mode usage name".into());
+            }
+        }
+    }
     if !reader.bytes.is_empty() {
         return Err("Workspace file has unexpected trailing data".into());
     }
     layouts.sort_by_key(|layout| layout.id);
-    Ok(layouts)
+    Ok((layouts, usage))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn usage_v2_preserves_presets_and_u64_counts_with_bounded_decoding() {
+        let layouts = decode(include_bytes!("../../../tests/fixtures/workspace.ksw")).unwrap();
+        let usage = Usage::from([("normal".into(), u64::MAX), ("window".into(), 125)]);
+        let bytes = encode_workspace(&layouts, &usage).unwrap();
+        assert_eq!(
+            bytes,
+            include_bytes!("../../../tests/fixtures/workspace-usage.ksw")
+        );
+        assert_eq!(bytes[8], 2);
+        assert_eq!(decode_workspace(&bytes).unwrap(), (layouts, usage));
+        for len in 0..bytes.len() {
+            assert!(decode_workspace(&bytes[..len]).is_err());
+        }
+        let mut invalid = bytes;
+        invalid.push(0);
+        assert!(decode_workspace(&invalid).is_err());
+        assert!(encode_workspace(&[], &Usage::from([(String::new(), 1)])).is_err());
+    }
     #[test]
     fn shared_typed_browser_fixture_roundtrips_and_rejects_truncation() {
         let bytes = include_bytes!("../../../tests/fixtures/workspace.ksw");

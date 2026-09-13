@@ -434,6 +434,7 @@ mod tests {
         config.recursive_grid.grid_rows = 3;
         config.recursive_grid.keys = "rtyfghvbn".into();
         config.recursive_grid.max_depth = 10;
+        config.recursive_grid.ui.label.font_size = 20;
         config
     }
 
@@ -506,6 +507,37 @@ mod tests {
                 _ => None,
             })
             .expect("expected an overlay")
+    }
+
+    #[test]
+    fn default_letters_scale_with_recursive_cells() {
+        let env = Env::with(Config::default());
+        let mut mode = crate::app::mode_catalog::recursive_grid(&env.config);
+        let initial = activate(&mut mode, &env);
+        let initial_size = scene_of(&initial).labels[0].style.font_size;
+        assert_eq!(initial_size, 300.0 * 0.40);
+        assert!(!scene_of(&initial).labels[0].style.bold);
+        let nested = press(&mut mode, &env, "s");
+        let nested_size = scene_of(&nested).labels[0].style.font_size;
+        assert_eq!(nested_size, 100.0 * 0.40);
+    }
+
+    #[test]
+    fn configured_font_size_reaches_recursive_grid_letters() {
+        for size in [17, 20, 36] {
+            let config =
+                Config::parse(&format!("[recursive_grid.ui]\nfont_size = {size}")).unwrap();
+            let env = Env::with(config);
+            let mut mode = crate::app::mode_catalog::recursive_grid(&env.config);
+            let out = activate(&mut mode, &env);
+            let labels = &scene_of(&out).labels;
+            assert_eq!(labels.len(), 9);
+            assert!(
+                labels
+                    .iter()
+                    .all(|label| label.style.font_size == f64::from(size))
+            );
+        }
     }
 
     #[test]

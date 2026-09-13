@@ -103,6 +103,10 @@ pub struct ConfigFile {
     pub mode_indicator: ModeIndicator,
     #[serde(default)]
     pub key_help: crate::api::style::KeyHelp,
+    #[serde(default)]
+    pub mode_usage: ModeUsage,
+    #[serde(default)]
+    pub quick_switch: QuickSwitch,
     /// Binding tables for plugin modes, keyed by mode id.
     ///
     /// A plugin mode is configured exactly like a built-in one; it just lives
@@ -148,6 +152,8 @@ impl Default for ConfigFile {
             pointer: Pointer::default(),
             mode_indicator: ModeIndicator::default(),
             key_help: Default::default(),
+            mode_usage: Default::default(),
+            quick_switch: Default::default(),
             plugin_modes: default_plugin_modes(),
             app_configs: Vec::new(),
             resolved_key_aliases: BTreeMap::new(),
@@ -165,6 +171,46 @@ impl Default for ConfigFile {
             panic!("built-in bindings must be valid: {error}");
         }
         config
+    }
+}
+
+/// Usage is checkpointed by events, never by a periodic timer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ModeUsage {
+    pub save_after_entries: u32,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct QuickSwitch {
+    pub enabled: bool,
+    pub key: String,
+    pub hold_ms: u64,
+    pub blacklist: Vec<String>,
+    pub position: crate::api::style::QuickSwitchPosition,
+    pub ui: LabelUi,
+}
+impl Default for QuickSwitch {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            key: "q".into(),
+            hold_ms: 350,
+            blacklist: vec!["idle".into()],
+            position: Default::default(),
+            ui: LabelUi {
+                font_size: 28,
+                padding_x: 10,
+                ..Default::default()
+            },
+        }
+    }
+}
+impl Default for ModeUsage {
+    fn default() -> Self {
+        Self {
+            save_after_entries: 100,
+        }
     }
 }
 

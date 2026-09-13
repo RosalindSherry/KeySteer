@@ -1,5 +1,9 @@
 # 配置、按键和持久化
 
+`[mode_usage].save_after_entries` 默认 100，必须是正 u32；不再使用分钟间隔。每次实际模式转换累计一次，工作区修改和正常退出也保存。workspace.ksw 的 v2 在 v1 预设记录后添加最多 256 条模式名与 u64 进入次数；v1 仍可读取，无统计时仍导出 v1。浏览器用十进制字符串保存 u64，避免 JS Number 精度丢失。
+
+`[quick_switch]` 默认 enabled=true、key="q"、hold_ms=350、blacklist=["idle"]、position="mouse"；位置另支持 screen/window。`ui` 使用 LabelUi 字号、字体、圆角、内边距、边框及可选主题颜色，浅深两份样式在加载时编译。黑名单仅限制面板，不禁止原快捷键。完整配置导出和网页统计／配置编辑同步支持这两个配置段。
+
 ## UI Hint 范围
 
 `[ui_hint].scan_scope = "window" | "screen"`，默认 `window`。`screen` 仅指鼠标所在显示器的完整范围，
@@ -17,6 +21,8 @@
 窗口操作拆成五个独立配置段，所有入口和 Q 都是普通 Mode 绑定；不存在专用退出字段或路径相关返回栈。详见下方配置边界。
 
 ## 配置模型
+
+Recursive Grid 的 `ui.font_size = 0` 默认按格子短边的 40% 自动显示字母，默认使用常规字重；正数仍是用户指定的最大字号。内部导出和网页编辑器保留此语义。
 
 根类型是 `src/config/mod.rs::ConfigFile`（`Config` 暂为内部迁移别名）。所有主要 section 都有默认值，因此空配置或没有
 配置合法。根类型和大多数结构使用 `deny_unknown_fields`，拼错字段应在加载时明确失败，

@@ -5,6 +5,45 @@ use crate::api::binding::{Button, Direction, ScrollAmount, Speed};
 use crate::api::{ButtonAction, ModeId, MouseButton, VisionOptions};
 
 #[test]
+fn recursive_grid_font_size_is_read_from_flat_ui_config() {
+    for size in [17, 20, 36] {
+        let config = Config::parse(&format!("[recursive_grid.ui]\nfont_size = {size}")).unwrap();
+        assert_eq!(config.recursive_grid.ui.label.font_size, size);
+    }
+}
+
+#[test]
+fn usage_threshold_and_quick_switch_export_and_validate() {
+    let source = r##"
+[mode_usage]
+save_after_entries = 37
+[quick_switch]
+position = "mouse"
+blacklist = ["idle", "window_tab"]
+[quick_switch.ui]
+text_color = { light = "#123456FF", dark = "#FFEEDDFF" }
+"##;
+    let config = Config::parse(source).unwrap();
+    config.validate().unwrap();
+    let restored = Config::parse(&config.to_toml().unwrap()).unwrap();
+    assert_eq!(restored.mode_usage.save_after_entries, 37);
+    assert_eq!(restored.quick_switch, config.quick_switch);
+    for invalid in [
+        "[mode_usage]\nsave_after_entries = 0",
+        "[quick_switch]\nhold_ms = 0",
+        "[quick_switch]\nkey = 'shift'",
+        "[quick_switch]\nposition = 'desktop'",
+        "[quick_switch.ui]\ntext_color = '#bad'",
+    ] {
+        assert!(
+            Config::parse(invalid)
+                .and_then(|config| config.validate())
+                .is_err()
+        );
+    }
+}
+
+#[test]
 fn editor_card_only_overrides_position() {
     let config = Config::parse("[window.card]\napp_font_size = 24\n[window_editor.card]\nposition = ['20%', '50%', '80%', '50%']").unwrap();
     config.validate().unwrap();

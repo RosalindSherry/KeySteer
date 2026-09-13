@@ -308,6 +308,11 @@ z = "window_undo"
 q = "idle"
 "primary+q" = "idle"
 [window.card]
+# Guide from the window center to a displaced card, including collision avoidance.
+guide_line_enabled = true
+guide_line_width = 3.0
+# Inherits the card border color; alpha controls transparency.
+# guide_line_color = "#6E82D680"
 position_mode = "window" # window or screen
 position = ["50%", "50%", "50%", "50%"] # top, right, bottom, left
 # Shared by Window / Quick / Editor / Restore / Tabs.
@@ -695,8 +700,9 @@ after_click = "keep"
 # ]
 
 [recursive_grid.ui]
-# Maximum font size; labels shrink with cells and disappear below this size.
-font_size = 20
+# 0 sizes letters at 40% of the shorter cell edge.
+# Positive values set a maximum font size; small cells shrink labels to fit.
+font_size = 0
 label_min_font_size = 6
 line_width = 1
 # line_color      = "#6E82D6FF"
@@ -843,6 +849,29 @@ preserve = true
 # mouse_key_help 控制鼠标模式默认显示；字号用于按键与说明，标题与布局自动适配。
 # 空字体及未指定的背景/文字色继承模式指示器与主题；尺寸为逻辑像素。
 # 颜色支持 "#RRGGBBAA" 或 { light = "#RRGGBBAA", dark = "#RRGGBBAA" }。
+[mode_usage]
+# Save after this many new mode entries, and on workspace edits / orderly exit.
+# No periodic save timer. Counts are stored in workspace.ksw.
+save_after_entries = 100
+
+[quick_switch]
+enabled = true
+key = "q"
+hold_ms = 350
+# Only filters this panel; original mode shortcuts remain available.
+blacklist = ["idle"]
+# screen = current screen center; window = focused window center; mouse = below indicator.
+position = "mouse"
+
+[quick_switch.ui]
+font_size = 28
+font_family = ""
+border_radius = -1
+padding_x = 10
+padding_y = -1
+border_width = 1
+# Optional background_color, text_color, matched_text_color, border_color: #RRGGBBAA
+
 [key_help]
 # Window / A / E / R / T 初始面板显示；false 时仍可按 ? 切换。
 window_key_help = true

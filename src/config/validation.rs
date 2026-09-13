@@ -60,6 +60,42 @@ impl ConfigFile {
     /// Reject configurations that would misbehave at runtime.
     pub fn validate(&self) -> Result<(), ConfigError> {
         let bad = |m: String| ConfigError::Invalid(m);
+        if self.mode_usage.save_after_entries == 0 {
+            return Err(bad(
+                "mode_usage.save_after_entries must be at least 1".into()
+            ));
+        }
+        let switch = &self.quick_switch;
+        if !(1..=10000).contains(&switch.hold_ms)
+            || Key::new(&switch.key).is_err()
+            || Key::new(&switch.key).is_ok_and(|key| {
+                key.is_modifier() || key.as_char().is_some_and(|ch| ch.is_ascii_digit())
+            })
+        {
+            return Err(bad(
+                "quick_switch requires a non-modifier, non-digit key and hold_ms 1..=10000".into(),
+            ));
+        }
+        if switch
+            .blacklist
+            .iter()
+            .any(|mode| ModeId::new(mode.clone()).is_err())
+        {
+            return Err(bad(
+                "quick_switch.blacklist contains an invalid mode id".into()
+            ));
+        }
+        validate_label_colors("quick_switch.ui", &switch.ui)?;
+        if !(1..=200).contains(&switch.ui.font_size)
+            || !(-1..=200).contains(&switch.ui.padding_x)
+            || !(-1..=200).contains(&switch.ui.padding_y)
+            || !(-1..=200).contains(&switch.ui.border_radius)
+            || !(0..=100).contains(&switch.ui.border_width)
+        {
+            return Err(bad(
+                "quick_switch.ui has invalid font, padding or border dimensions".into(),
+            ));
+        }
         for (name, value) in [
             ("window.move_step", self.window.move_step),
             ("window.move_speed", self.window.move_speed),
@@ -104,6 +140,7 @@ impl ConfigFile {
             card.position_ratios()
                 .map_err(|error| bad(format!("window.card.position: {error}")))?;
             for (field, value, min, max) in [
+                ("guide_line_width", card.guide_line_width, 0.0, 32.0),
                 ("app_font_size", card.app_font_size, 0.0, 256.0),
                 ("title_font_size", card.title_font_size, 0.0, 256.0),
                 ("text_width", card.text_width, 1.0, 4096.0),
@@ -124,6 +161,10 @@ impl ConfigFile {
                 card.background_color.as_ref(),
             )?;
             validate_optional_color("window.card.border_color", card.border_color.as_ref())?;
+            validate_optional_color(
+                "window.card.guide_line_color",
+                card.guide_line_color.as_ref(),
+            )?;
             validate_optional_color("window.card.number_color", card.number_color.as_ref())?;
             validate_optional_color(&format!("{name}.card.app_color"), card.app_color.as_ref())?;
             validate_optional_color(

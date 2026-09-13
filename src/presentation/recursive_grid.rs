@@ -45,7 +45,7 @@ impl RecursiveGridView<'_> {
             Color::TRANSPARENT
         };
 
-        let base_style = self.ui.label.resolve(
+        let mut base_style = self.ui.label.resolve(
             palette,
             label_bg,
             palette.text,
@@ -55,6 +55,14 @@ impl RecursiveGridView<'_> {
                 Color::TRANSPARENT
             },
         );
+        // Keep auto-sized keys readable without dominating the cell.
+        // Positive configured sizes remain an explicit upper bound.
+        if self.ui.label.font_size == 0 {
+            base_style.font_size = (area.width / self.layout.cols.max(1) as f64)
+                .min(area.height / self.layout.rows.max(1) as f64)
+                * 0.40;
+        }
+        base_style.bold = false;
         let line_width = self.ui.line_width.max(0) as f64;
         let layout = self.layout;
         let shape_capacity = if self.terminal {

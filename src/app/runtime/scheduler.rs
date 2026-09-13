@@ -54,6 +54,7 @@ impl Engine {
             && self.scheduler.sequences.is_empty()
             && self.input.pending_long_press_toggles.is_empty()
             && self.input.drag_auto_release.fires_at.is_none()
+            && self.quick_switch.pending.as_ref().is_none_or(|p| p.visible)
         {
             return MAX;
         }
@@ -75,6 +76,13 @@ impl Engine {
                     .map(|pending| pending.fires_at),
             )
             .chain(self.input.drag_auto_release.fires_at)
+            .chain(
+                self.quick_switch
+                    .pending
+                    .as_ref()
+                    .filter(|p| !p.visible)
+                    .map(|p| p.deadline),
+            )
             .map(|fires_at| fires_at.saturating_duration_since(now))
             .min()
             .unwrap_or(MAX)

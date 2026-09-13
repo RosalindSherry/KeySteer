@@ -469,12 +469,16 @@ pub(crate) fn avoid_overlaps(scene: &mut OverlayScene, screen: &Screen, panels: 
                     connected = true;
                 }
             }
-            if !connected {
+            let connector = scene.labels[annotation.primary].connector;
+            if !connected && connector.is_none_or(|style| style.enabled) {
                 scene.push_shape(OverlayShape::label_connector(
                     old.center(),
                     placed.center(),
-                    scene.labels[annotation.primary].style.border_color,
-                    2.0 * scale,
+                    connector.map_or(
+                        scene.labels[annotation.primary].style.border_color,
+                        |style| style.color,
+                    ),
+                    connector.map_or(2.0, |style| style.width) * scale,
                     annotation.group,
                 ));
             }
@@ -486,6 +490,46 @@ pub(crate) fn avoid_overlaps(scene: &mut OverlayScene, screen: &Screen, panels: 
 mod tests {
     use super::*;
     use crate::api::overlay::LabelStyle;
+
+    #[test]
+    fn card_guide_style_survives_avoidance_and_can_be_disabled() {
+        let screen = Screen {
+            bounds: Rect::new(0.0, 0.0, 1200.0, 800.0),
+            work_area: Rect::new(0.0, 0.0, 1200.0, 800.0),
+            scale: 1.0,
+            is_primary: true,
+            name: None,
+        };
+        for enabled in [true, false] {
+            let mut scene = OverlayScene::new();
+            let original = Rect::new(400.0, 300.0, 250.0, 60.0);
+            let mut label = OverlayLabel::new("", original, LabelStyle::default())
+                .with_placement(1, Role::Background);
+            let color = crate::api::overlay::Color::rgb(255, 0, 0);
+            label.connector = Some(crate::api::overlay::LabelConnectorStyle {
+                enabled,
+                width: 5.0,
+                color,
+            });
+            scene.push_label(label);
+            avoid_overlaps(&mut scene, &screen, &[original]);
+            assert_ne!(scene.labels[0].rect, original);
+            let lines: Vec<_> = scene
+                .shapes
+                .iter()
+                .filter_map(|shape| match shape {
+                    OverlayShape::Line {
+                        color,
+                        width,
+                        placement_group: Some(1),
+                        ..
+                    } => Some((*color, *width)),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(lines, if enabled { vec![(color, 5.0)] } else { vec![] });
+        }
+    }
 
     #[test]
     fn all_annotation_kinds_avoid_each_other_and_panels_without_changing_keys_or_fonts() {

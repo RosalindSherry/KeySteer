@@ -369,7 +369,11 @@ fn scale_style(style: &mut LabelStyle, scale: f64) {
     style.font_size = (style.font_size * scale).round().max(1.0);
     style.padding_x = (style.padding_x * scale).round();
     style.padding_y = (style.padding_y * scale).round();
-    style.border_width = (style.border_width * scale).round().max(1.0);
+    style.border_width = if style.border_width > 0.0 {
+        (style.border_width * scale).round().max(1.0)
+    } else {
+        0.0
+    };
     style.border_radius = (style.border_radius * scale).round();
 }
 
@@ -1223,6 +1227,20 @@ extern "system" fn window_proc(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn dpi_scaling_preserves_borderless_text() {
+        for scale in [1.0, 1.25, 1.5, 2.0] {
+            let mut style = crate::api::overlay::LabelStyle {
+                border_width: 0.0,
+                ..Default::default()
+            };
+            super::scale_style(&mut style, scale);
+            assert_eq!(style.border_width, 0.0);
+            style.border_width = 0.5;
+            super::scale_style(&mut style, scale);
+            assert!(style.border_width >= 1.0);
+        }
+    }
     use super::*;
 
     #[test]

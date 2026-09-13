@@ -551,3 +551,4 @@ include!("overlay.rs");
 include!("reload_scheduler.rs");
 include!("window_mover.rs");
 include!("window_mode.rs");
+include!("quick_switch.rs");

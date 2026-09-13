@@ -1,22 +1,23 @@
 //! Native top-status-item controls.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use objc2::rc::{Allocated, Retained, autoreleasepool};
-use objc2::runtime::{AnyObject, NSObject};
+use objc2::runtime::{AnyObject, NSObject, ProtocolObject};
 use objc2::{
     AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel,
 };
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSButton,
-    NSCellImagePosition, NSControlStateValueOff, NSControlStateValueOn, NSFont, NSImage,
-    NSImageView, NSMenu, NSMenuItem, NSPanel, NSSquareStatusItemLength, NSStatusBar, NSStatusItem,
-    NSTextField, NSView, NSWindowStyleMask, NSWorkspace,
+    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate,
+    NSApplicationTerminateReply, NSBackingStoreType, NSButton, NSCellImagePosition,
+    NSControlStateValueOff, NSControlStateValueOn, NSFont, NSImage, NSImageView, NSMenu,
+    NSMenuItem, NSPanel, NSSquareStatusItemLength, NSStatusBar, NSStatusItem, NSTextField, NSView,
+    NSWindowStyleMask, NSWorkspace,
 };
-use objc2_foundation::{NSData, NSPoint, NSRect, NSSize, NSString, NSURL};
+use objc2_foundation::{NSData, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSURL};
 
 use crate::api::Autostart;
 use crate::api::backend::{BackendEvent, UpdateCheckResult, UpdateProgress};
@@ -31,6 +32,7 @@ const STATUS_ICON_PNG: &[u8] = include_bytes!("../../../assets/icons/keysteer-ic
 const STATUS_ICON_SIZE: f64 = 18.0;
 
 struct StatusTargetIvars {
+    terminating: Cell<bool>,
     note: RefCell<Option<NotePanel>>,
     update_alert: RefCell<Option<Retained<NSPanel>>>,
     downloaded_update: RefCell<Option<PathBuf>>,
@@ -59,6 +61,19 @@ define_class!(
     #[name = "KeySteerStatusTarget"]
     #[ivars = StatusTargetIvars]
     struct StatusTarget;
+
+    // SAFETY: NSObject is initialized in StatusTarget::new.
+    unsafe impl NSObjectProtocol for StatusTarget {}
+
+    // SAFETY: The delegate is main-thread-only and retained for the application's lifetime.
+    unsafe impl NSApplicationDelegate for StatusTarget {
+        #[unsafe(method(applicationShouldTerminate:))]
+        fn application_should_terminate(&self, _sender: &NSApplication) -> NSApplicationTerminateReply {
+            self.ivars().terminating.set(true);
+            emit(BackendEvent::Quit);
+            NSApplicationTerminateReply::TerminateLater
+        }
+    }
 
     impl StatusTarget {
         #[unsafe(method(saveLayoutNote:))]
@@ -160,6 +175,7 @@ impl StatusTarget {
     fn new(mtm: MainThreadMarker) -> Retained<Self> {
         let this: Allocated<Self> = mtm.alloc();
         let this = this.set_ivars(StatusTargetIvars {
+            terminating: Cell::new(false),
             note: RefCell::new(None),
             update_alert: RefCell::new(None),
             downloaded_update: RefCell::new(None),
@@ -320,6 +336,7 @@ impl StatusItem {
             .unwrap_or_else(|error| error.into_inner()) = Some(sender);
 
         let target = StatusTarget::new(mtm);
+        NSApplication::sharedApplication(mtm).setDelegate(Some(ProtocolObject::from_ref(&*target)));
         let menu = NSMenu::new(mtm);
         menu.setAutoenablesItems(false);
 
@@ -662,6 +679,12 @@ impl Drop for StatusItem {
         }
         if let Some(status_bar) = self.item.statusBar() {
             status_bar.removeStatusItem(&self.item);
+        }
+        let application = NSApplication::sharedApplication(self._target.mtm());
+        application.setDelegate(None);
+        if self._target.ivars().terminating.get() {
+            // Engine flushes workspace statistics before shutting down the backend.
+            application.replyToApplicationShouldTerminate(true);
         }
     }
 }

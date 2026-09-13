@@ -39,7 +39,8 @@ use std::path::{Path, PathBuf};
 // apartment-scoped Core Audio interfaces. Explicit Shift audio actions add six
 // endpoint/property blocks and one non-disruptive native policy probe. The
 // versioned policy adapter adds three exact ABI slots and four scoped call blocks.
-const MAX_UNSAFE_EXPRESSIONS: usize = 367;
+// Two audited Objective-C protocol conformances for deferred system termination.
+const MAX_UNSAFE_EXPRESSIONS: usize = 368;
 const MAX_UNSAFE_FILES: usize = 31;
 const PER_FILE_BUDGET: &[(&str, usize)] = &[
     // macOS audio owns, changes, maintains and destroys native state,
@@ -57,7 +58,9 @@ const PER_FILE_BUDGET: &[(&str, usize)] = &[
     ("src/platform/macos/native.rs", 7),
     ("src/platform/macos/overlay.rs", 6),
     ("src/platform/macos/permissions.rs", 5),
-    ("src/platform/macos/status_item.rs", 6),
+    // Shutdown adds only NSObjectProtocol / NSApplicationDelegate conformance on
+    // the retained main-thread status target; no new raw native calls or Send/Sync.
+    ("src/platform/macos/status_item.rs", 7),
     ("src/platform/windows/text_prompt.rs", 7),
     ("src/platform/macos/vision.rs", 5),
     ("src/platform/windows/accessibility.rs", 31),

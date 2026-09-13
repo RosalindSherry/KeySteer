@@ -532,6 +532,9 @@ impl Engine {
         input: crate::api::input::InputEvent,
         backend: &mut dyn Backend,
     ) -> Result<(), String> {
+        if self.quick_switch_key(&input, backend)? {
+            return Ok(());
+        }
         // Holding a key can generate dozens of repeats per second. The normal
         // debug stream records the physical down/up edges; opt into `motion`
         // only when every OS repeat is needed for a performance trace.

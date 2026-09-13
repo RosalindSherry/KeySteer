@@ -8,6 +8,8 @@ export type WindowTemplate = { kind: 'layout'; data: RegionTemplate } | { kind: 
 export interface SavedWindowPreset { id: number; note: string; window_count: number; template: WindowTemplate }
 export const WORKSPACE_FILE_NAME = 'workspace.ksw'
 export const WORKSPACE_STORAGE_KEY = 'keysteer.simulator.workspace.v1'
+/** Decimal strings retain the full Rust u64 range across JSON and browser storage. */
+export type ModeUsage = Record<string, string>
 export function regionTemplate(node: LayoutNode): RegionTemplate {
   return node.kind === 'slot' ? { kind: 'slot', id: node.id } : { kind: 'split', axis: node.axis, ratio: node.ratio, first: regionTemplate(node.first), second: regionTemplate(node.second) }
 }
@@ -67,7 +69,7 @@ function validateSavedPresets(data: unknown): SavedWindowPreset[] {
 
 const FILE_HEADER = [75, 83, 87, 79, 82, 75, 83, 80, 1]
 /** Identical to app/preset_store/codec.rs; browser storage remains independent. */
-export function encodeWorkspaceFile(layouts: SavedWindowPreset[]): Uint8Array {
+export function encodeWorkspaceFile(layouts: SavedWindowPreset[], usage: ModeUsage = {}): Uint8Array {
   const checked = validateSavedPresets(layouts)
   const output = [...FILE_HEADER, checked.length], encoder = new TextEncoder()
   function integer(value: number, length: number): void { for (let i = 0; i < length; i++) output.push((value >>> (i * 8)) & 255) }
@@ -88,9 +90,23 @@ export function encodeWorkspaceFile(layouts: SavedWindowPreset[]): Uint8Array {
       integer(layout.template.data.active, 2)
     } else tree(layout.template.data)
   }
+  const entries = Object.entries(usage).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+  if (entries.length > 256) throw new Error('模式统计数量过多')
+  if (entries.length) {
+    output[8] = 2; integer(entries.length, 2)
+    for (const [mode, count] of entries) {
+      const name = encoder.encode(mode)
+      if (!name.length || name.length > 255 || !/^\d+$/.test(count) || BigInt(count) > 0xffffffffffffffffn) throw new Error('模式统计无效')
+      output.push(name.length, ...name)
+      const bytes = new Uint8Array(8); new DataView(bytes.buffer).setBigUint64(0, BigInt(count), true); output.push(...bytes)
+    }
+  }
   return new Uint8Array(output)
 }
 export function decodeWorkspaceFile(bytes: Uint8Array): SavedWindowPreset[] {
+  return decodeWorkspaceDocument(bytes).presets
+}
+export function decodeWorkspaceDocument(bytes: Uint8Array): { presets: SavedWindowPreset[]; usage: ModeUsage } {
   if (bytes.length > 1024 * 1024) throw new Error('工作区文件过大')
   let offset = 0
   function take(count: number): Uint8Array {
@@ -100,7 +116,7 @@ export function decodeWorkspaceFile(bytes: Uint8Array): SavedWindowPreset[] {
   function integer(length: number): number { return take(length).reduce((value, byte, index) => value + byte * 2 ** (index * 8), 0) }
   if (!take(8).every((byte, index) => byte === FILE_HEADER[index])) throw new Error('不支持此工作区文件版本')
   const version = integer(1)
-  if (version !== 1) throw new Error('不支持此工作区文件版本')
+  if (version !== 1 && version !== 2) throw new Error('不支持此工作区文件版本')
   const count = integer(1)
   if (count > 99) throw new Error('预设数量过多')
   function tree(depth: number, budget: { nodes: number }): RegionTemplate {
@@ -124,6 +140,16 @@ export function decodeWorkspaceFile(bytes: Uint8Array): SavedWindowPreset[] {
       layouts.push({ id, window_count, note, template: { kind: 'tabs', data: { region, active } } })
     } else throw new Error('预设类型无效')
   }
+  const usage: ModeUsage = Object.create(null)
+  if (version === 2) {
+    const count = integer(2)
+    if (count > 256) throw new Error('模式统计数量过多')
+    for (let i = 0; i < count; i++) {
+      const mode = decoder.decode(take(integer(1))), number = take(8)
+      if (!mode || Object.hasOwn(usage, mode)) throw new Error('模式统计名称无效或重复')
+      usage[mode] = new DataView(number.buffer, number.byteOffset, 8).getBigUint64(0, true).toString()
+    }
+  }
   if (offset !== bytes.length) throw new Error('工作区文件含有多余数据')
-  return validateSavedPresets(layouts)
+  return { presets: validateSavedPresets(layouts), usage }
 }

@@ -74,3 +74,14 @@ test('a layout read error still imports bindings and explains the missing preset
   const context = browser(handoffHash(JSON.stringify({ source, presets: null, preset_error: 'File is damaged' }), 'v2'))
   assert.deepEqual(await consumeConfigHandoff(context.location, context.history), { kind: 'config', source, presetError: 'File is damaged' })
 })
+
+test('one-click handoff retains workspace usage without losing u64 precision', async () => {
+  const file = readFileSync(new URL('../../../tests/fixtures/workspace-usage.ksw', import.meta.url))
+  const context = browser(handoffHash(JSON.stringify({ source: '', presets: file.toString('base64url'), preset_error: null }), 'v2'))
+  const result = await consumeConfigHandoff(context.location, context.history)
+  assert.equal(result.kind, 'config')
+  if (result.kind === 'config') {
+    assert.equal(result.usage?.normal, '18446744073709551615')
+    assert.equal(result.usage?.window, '125')
+  }
+})

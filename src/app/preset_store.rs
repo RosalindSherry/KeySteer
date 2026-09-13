@@ -1,5 +1,6 @@
 //! Bounded binary workspace presets using the same directory policy as logs.
 mod codec;
+mod usage;
 use crate::api::window_presets::{MAX_PRESETS, SavedPreset, WindowTemplate};
 use crate::config::ReplaceFile;
 use std::io::{Read, Write};
@@ -13,8 +14,21 @@ const MAX_FILE_BYTES: u64 = 1024 * 1024;
 pub(crate) struct PresetStore {
     file: Option<(PathBuf, ReplaceFile)>,
     memory: Vec<SavedPreset>,
+    usage: codec::Usage,
+    pending_entries: u32,
+    io: std::sync::Arc<std::sync::Mutex<()>>,
+    worker: Option<usage::UsageWorker>,
 }
 impl super::runtime::PresetRepository for PresetStore {
+    fn record_mode_entry(&mut self, mode: &str, save_after_entries: u32) {
+        self.record_entry(mode, save_after_entries);
+    }
+    fn mode_usage(&self) -> codec::Usage {
+        self.usage.clone()
+    }
+    fn flush_usage(&mut self) -> Result<(), String> {
+        self.finish_usage()
+    }
     fn delete(&mut self, expected: &SavedPreset) -> Result<Vec<SavedPreset>, String> {
         Self::delete(self, expected)
     }
@@ -42,26 +56,40 @@ impl PresetStore {
                 .try_exists()
                 .map_err(|e| format!("Cannot read saved presets: {e}"))?
             {
-                return Ok(None);
+                return if self.usage.is_empty() {
+                    Ok(None)
+                } else {
+                    codec::encode_workspace(&[], &self.usage).map(Some)
+                };
             }
-        } else if self.memory.is_empty() {
+        } else if self.memory.is_empty() && self.usage.is_empty() {
             return Ok(None);
         }
-        codec::encode(&self.list()?).map(Some)
+        let (layouts, mut usage) = self.read_workspace()?;
+        usage::merge(&mut usage, &self.usage);
+        codec::encode_workspace(&layouts, &usage).map(Some)
     }
     pub(crate) fn persistent(path: PathBuf, replace: ReplaceFile) -> Self {
-        Self {
+        let mut store = Self {
             file: Some((path, replace)),
-            memory: Vec::new(),
+            ..Default::default()
+        };
+        match store.read_workspace() {
+            Ok((_, usage)) => store.usage = usage,
+            Err(error) => crate::report_error!("mode-usage", "{error}"),
         }
+        store
     }
     pub(crate) fn list(&self) -> Result<Vec<SavedPreset>, String> {
+        self.read_workspace().map(|(layouts, _)| layouts)
+    }
+    fn read_workspace(&self) -> Result<(Vec<SavedPreset>, codec::Usage), String> {
         let Some((path, _)) = &self.file else {
-            return Ok(self.memory.clone());
+            return Ok((self.memory.clone(), self.usage.clone()));
         };
         let file = match std::fs::File::open(path) {
             Ok(file) => file,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Default::default()),
             Err(e) => return Err(format!("Cannot read saved presets: {e}")),
         };
         let mut bytes = Vec::new();
@@ -71,7 +99,7 @@ impl PresetStore {
         if bytes.len() as u64 > MAX_FILE_BYTES {
             return Err("Saved presets file is too large".into());
         }
-        codec::decode(&bytes)
+        codec::decode_workspace(&bytes)
     }
     pub(crate) fn save(
         &mut self,
@@ -79,6 +107,8 @@ impl PresetStore {
         window_count: usize,
         note: String,
     ) -> Result<(u32, Vec<SavedPreset>), String> {
+        let io = self.io.clone();
+        let _guard = io.lock().map_err(|_| "Workspace writer lock poisoned")?;
         let mut layouts = self.list()?;
         let id = (1..=MAX_PRESETS as u32)
             .find(|id| !layouts.iter().any(|l| l.id == *id))
@@ -93,9 +123,12 @@ impl PresetStore {
         layouts.push(layout);
         layouts.sort_by_key(|l| l.id);
         self.write_layouts(&layouts)?;
+        self.pending_entries = 0;
         Ok((id, layouts))
     }
     pub(crate) fn delete(&mut self, expected: &SavedPreset) -> Result<Vec<SavedPreset>, String> {
+        let io = self.io.clone();
+        let _guard = io.lock().map_err(|_| "Workspace writer lock poisoned")?;
         let mut layouts = self.list()?;
         let current = layouts
             .iter()
@@ -106,11 +139,14 @@ impl PresetStore {
         }
         layouts.retain(|layout| layout.id != expected.id);
         self.write_layouts(&layouts)?;
+        self.pending_entries = 0;
         Ok(layouts)
     }
     fn write_layouts(&mut self, layouts: &[SavedPreset]) -> Result<(), String> {
         if let Some((path, replace)) = &self.file {
-            let bytes = codec::encode(layouts)?;
+            let (_, mut usage) = self.read_workspace()?;
+            usage::merge(&mut usage, &self.usage);
+            let bytes = codec::encode_workspace(layouts, &usage)?;
             if bytes.len() as u64 > MAX_FILE_BYTES {
                 return Err("Saved presets file is too large".into());
             }
@@ -190,13 +226,16 @@ mod tests {
         assert_eq!(presets[0].name(), "Custom");
         std::fs::remove_file(path).unwrap();
     }
-    fn replace(source: &std::path::Path, target: &std::path::Path) -> std::io::Result<()> {
+    pub(super) fn replace(
+        source: &std::path::Path,
+        target: &std::path::Path,
+    ) -> std::io::Result<()> {
         std::fs::rename(source, target)
     }
-    fn fail(_: &std::path::Path, _: &std::path::Path) -> std::io::Result<()> {
+    pub(super) fn fail(_: &std::path::Path, _: &std::path::Path) -> std::io::Result<()> {
         Err(std::io::Error::other("injected replacement failure"))
     }
-    fn path() -> PathBuf {
+    pub(super) fn path() -> PathBuf {
         std::env::temp_dir().join(format!(
             "keysteer-workspace-test-{}-{}.ksw",
             std::process::id(),

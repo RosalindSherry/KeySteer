@@ -204,6 +204,27 @@ pub fn compile(config: &ConfigFile) -> Result<RuntimePlan, String> {
             ui_hint_overlap_key: config.ui_hint.overlap_cycle_key.clone(),
             mode_indicator: config.mode_indicator.clone(),
             key_help: config.key_help.clone(),
+            usage_save_after_entries: config.mode_usage.save_after_entries,
+            quick_switch: {
+                let style = |appearance| {
+                    let palette = config.theme.palette(appearance);
+                    crate::api::style::QuickSwitchStyles::new(config.quick_switch.ui.resolve(
+                        &palette,
+                        palette.surface_label(),
+                        palette.text,
+                        palette.accent_border(),
+                    ))
+                };
+                super::runtime::QuickSwitchSettings {
+                    enabled: config.quick_switch.enabled,
+                    key: crate::api::Key::new(&config.quick_switch.key)?,
+                    hold_ms: config.quick_switch.hold_ms,
+                    blacklist: config.quick_switch.blacklist.clone(),
+                    position: config.quick_switch.position,
+                    light: style(crate::api::Appearance::Light),
+                    dark: style(crate::api::Appearance::Dark),
+                }
+            },
         },
         palettes: PaletteSet {
             light: config.palette(Appearance::Light),

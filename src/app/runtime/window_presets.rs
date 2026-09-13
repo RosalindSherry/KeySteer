@@ -6,6 +6,13 @@ use crate::api::window_presets::{
 };
 
 pub(crate) trait PresetRepository {
+    fn record_mode_entry(&mut self, _mode: &str, _save_after_entries: u32) {}
+    fn flush_usage(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+    fn mode_usage(&self) -> std::collections::BTreeMap<String, u64> {
+        Default::default()
+    }
     fn delete(
         &mut self,
         _expected: &crate::api::window_presets::SavedPreset,

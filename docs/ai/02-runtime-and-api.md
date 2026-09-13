@@ -1,5 +1,13 @@
 # 核心运行时与公共 API
 
+## 模式统计与快速切换
+
+`set_active` 仅在模式 id 实际改变时向 PresetRepository 记录进入次数；同模式 keep/restart 不增加计数。计数保留在内存，达到配置次数后用容量为 1 的 mailbox 提交后台 checkpoint，满队列保留 dirty 状态等待下一次进入；不在几何／帧路径写盘，也没有统计保存定时器。预设编辑与统计写入共用写锁，读取最新文件后合并单调计数，原子替换完整工作区。正常退出等待 worker 并保存剩余计数；错误统一进入 logging。
+
+Windows 托盘线程在 WM_QUERYENDSESSION 发出 SaveWorkspace 并有界等待确认；取消关机不会让 Engine 退出。macOS applicationShouldTerminate 返回 TerminateLater、发出 Quit，Engine 保存后由后端回复退出。不能保证强制结束或断电时未保存计数不丢失。
+
+QuickSwitcher 只接管操作模式中单独按下的配置键，默认 Q；短按在松键时执行原绑定，长按复用现有 poll deadline，Q+数字可立即选择。Idle、暂停、排除应用和原生备注输入不启用。面板打开时固定前 9 个模式的计数降序／id 同分排序；选择当前模式保持状态。按键 release 继续消费，捕获丢失清理候选与 captured 键。黑名单不参与普通快捷键路由。几何经 Backend::focused_window_bounds，样式在配置编译时解析，面板文本只在打开时构建。
+
 `Mode::window_action_supported` 描述模式稳定支持的 Window 动作，用于模式进入时构建固定快捷键表；`window_action_available` 描述当前能否执行，仍保留编辑事务、恢复输入和确认状态的检查。两者共享 WindowKind 的动作集合，帮助表不会因瞬时未就绪而丢失保存或确认键。Host 的帮助解析使用独立候选状态，实际输入解析仍使用真实按键状态。
 
 ## 合成指针跨屏通知

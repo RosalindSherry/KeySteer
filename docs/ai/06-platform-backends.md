@@ -1,5 +1,7 @@
 # Windows 与 macOS 原生后端
 
+系统退出保存：Windows 隐藏托盘窗口在 WM_QUERYENDSESSION 将 SaveWorkspace 交给 Engine，托盘线程最多等待 3 秒，不阻塞输入 Hook；仅 WM_ENDSESSION 成功才发 Quit。macOS 复用 retained、主线程限定的 StatusTarget 实现 NSObjectProtocol / NSApplicationDelegate，返回 TerminateLater；Engine 保存后再通过后端回复系统。新增的 unsafe 仅是这两项 Objective-C 协议契约，无额外裸指针操作或 Send/Sync。窗口中心快速面板通过 Backend::focused_window_bounds 读取 Win32／AX 几何，模式和 presentation 不接触平台。
+
 Grouped 按 WindowScope 筛选逻辑快照；活动组的隐藏成员仍继承活动成员的屏幕与最小化状态。编号在同一会话／范围内按窗口身份保留：最小化或暂时未进入候选库存不释放号码，恢复后沿用；仅明确关闭才删除，Acquire 或范围配置变化才清空并从 1 重建。可选数字仍只来自当前库存。持久组不随范围切换解散，范围外原生标签栏仍保留所有标题与点击目标，仅省略无效编号（TabBar 数字 0）。Windows ordinary_window_target 允许最小化库存，scannable_target 继续排除最小化 UI 扫描；最小化的屏幕归属从还原矩形确定。macOS 开启包含最小化时额外检查运行应用 AXWindows，普通窗口仍通过当前可见 Quartz 元数据匹配。
 
 ## Native safety boundary（2026-08）

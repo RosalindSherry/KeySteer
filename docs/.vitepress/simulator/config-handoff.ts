@@ -3,12 +3,12 @@ const CONFIG_ERROR_PREFIX = '#ks-config-error='
 const MAX_SOURCE_BYTES = 256 * 1024
 const MAX_FRAGMENT_BYTES = 24 * 1024
 const MAX_WORKSPACE_BYTES = 2 * 1024 * 1024
-import { decodeWorkspaceFile } from './window-presets.ts'
+import { decodeWorkspaceDocument } from './window-presets.ts'
 import type { SavedWindowPreset } from './window-presets.ts'
 
 export type ConfigHandoff =
   | { kind: 'none' }
-  | { kind: 'config'; source: string; presets?: SavedWindowPreset[]; presetError?: string }
+  | { kind: 'config'; source: string; presets?: SavedWindowPreset[]; usage?: import('./window-presets.ts').ModeUsage; presetError?: string }
   | { kind: 'error'; message: string }
 
 interface BrowserLocation {
@@ -73,7 +73,10 @@ export async function consumeConfigHandoff(
       if (workspace.presets !== null && (typeof workspace.presets !== 'string' || !/^[A-Za-z0-9_-]+$/.test(workspace.presets))) throw new Error('预设传递格式无效')
       if (workspace.preset_error !== null && typeof workspace.preset_error !== 'string') throw new Error('预设状态无效')
       return { kind: 'config', source: workspace.source,
-        ...(workspace.presets === null ? {} : { presets: decodeWorkspaceFile(decodeBase64Url(workspace.presets)) }),
+        ...(workspace.presets === null ? {} : (() => {
+          const document = decodeWorkspaceDocument(decodeBase64Url(workspace.presets))
+          return { presets: document.presets, ...(Object.keys(document.usage).length ? { usage: document.usage } : {}) }
+        })()),
         ...(workspace.preset_error === null ? {} : { presetError: workspace.preset_error }) }
     }
     return {

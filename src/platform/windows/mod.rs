@@ -550,6 +550,9 @@ impl Drop for WindowsBackend {
 }
 
 impl Backend for WindowsBackend {
+    fn focused_window_bounds(&self) -> Result<Option<crate::api::Rect>, String> {
+        Ok(accessibility::window_bounds(native::foreground_window()))
+    }
     fn request_text_prompt(
         &mut self,
         prompt: crate::api::window_presets::TextPrompt,

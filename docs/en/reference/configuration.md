@@ -10,6 +10,36 @@ To change only shortcuts, see [Getting started](/en/guide/getting-started).
 For action parameters, arrays, `exec`, and plugin verbs, see the [Modes and actions reference](/en/reference/modes-and-actions).
 :::
 
+## Mode usage and quick switching
+
+```toml
+[mode_usage]
+save_after_entries = 100
+
+[quick_switch]
+enabled = true
+key = "q"
+hold_ms = 350
+blacklist = ["idle"]
+position = "mouse" # screen / window / mouse
+
+[quick_switch.ui]
+font_size = 28
+border_width = 1
+border_radius = 6
+padding_x = 6
+padding_y = 8
+# background_color = "#EEF2FFFF"
+# text_color = "#193781FF"
+# border_color = "#506DD0FF"
+```
+
+Each actual mode change increments its entry count; repeats and same-mode keep/restart do not. Counts stay in memory until the configured positive number of new entries triggers a background checkpoint to `workspace.ksw` (100 by default). Workspace edits and orderly exit also save pending counts. There is no periodic save timer. Windows/macOS system termination notifications request a checkpoint; power loss, forced termination or an expired system shutdown deadline can still lose unsaved counts.
+
+In an operation mode, press Q alone and hold it for 350 ms to show the panel, or use Q+1…9 immediately. Releasing Q closes the panel; a short tap executes its original binding on release. Idle, paused operation, excluded applications and native note entry do not intercept Q. The panel shows up to nine registered modes, sorted by entry count and then mode id. Numbers stay fixed while it is open. Selecting the current mode preserves its state. The blacklist only filters the panel, leaving normal shortcuts available.
+
+Positions are the current pointer screen's center (`screen`), the foreground window's center with a screen fallback (`window`), or below the pointer's mode indicator (`mouse`), clamped to the current screen. Styles also support `font_family` and per-appearance colors, resolved when configuration loads. The web editor displays imported workspace statistics and edits the threshold and panel options, preserving counts on export. Version 1 files remain readable; files containing statistics use workspace version 2.
+
 ## Configuration file location
 
 KeySteer looks for `keysteer.<name>.toml` in its data directory. If no user configuration exists, it tries `keysteer.default.toml`; if neither exists, it uses built-in defaults.
@@ -199,6 +229,8 @@ after_click = "finish"
 `keys` must contain exactly `grid_cols × grid_rows` characters, assigned left-to-right and top-to-bottom. `max_depth` is the largest number of selection levels before confirmation. The first screen has large first-key labels and small second-key previews; `[grid.ui].matched_text_color`, `text_color`, and `matched_border_color` control these. The preview changes only drawing, not selection depth.
 
 ### Recursive Grid
+
+In `[recursive_grid.ui]`, `font_size = 0` (default) sizes letters at 40% of the shorter cell edge, then shrinks them to fit, using regular weight by default. Set a positive value such as `20` to specify a maximum font size.
 
 ```toml
 [recursive_grid]
@@ -444,3 +476,16 @@ button to a keyboard shortcut, bind the shortcut that the driver actually emits.
 Window and region labels use `[window.ui].font_size`, defaulting to 28. Region labels appear below the window-centre number. Help stays near the inside bottom edge when space permits and omits the redundant window-number key list.
 
 Quick rulers use the labels from split_ratios: mix "1/2", "1/3", 0.3 and 0.45. Use a quoted decimal such as "0.30" to preserve trailing zeros. A screen-proportioned preview below Actions labels the current width and height; other ratios appear as small ticks. The inner rectangle shows the current placement.
+
+### Window card guide lines
+
+Shared by Window and its related modes, including lines created by label collision avoidance. Hiding lines does not disable collision avoidance.
+
+```toml
+[window.card]
+guide_line_enabled = true
+guide_line_width = 3.0 # 0–32; 0 also hides lines
+# Inherits the card border color. The last two digits control alpha.
+# Light/dark themed colors are also supported.
+# guide_line_color = "#6E82D680"
+```

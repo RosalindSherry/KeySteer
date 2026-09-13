@@ -352,6 +352,12 @@ impl Drop for MacOsBackend {
 }
 
 impl Backend for MacOsBackend {
+    fn focused_window_bounds(&self) -> Result<Option<crate::api::Rect>, String> {
+        self.workspace
+            .focused_app()
+            .map(|app| accessibility::focused_window_bounds(app.process_id as libc::pid_t))
+            .transpose()
+    }
     fn request_text_prompt(
         &mut self,
         prompt: crate::api::window_presets::TextPrompt,

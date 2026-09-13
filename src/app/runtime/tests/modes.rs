@@ -77,6 +77,7 @@ fn pressing_an_active_modes_own_key_returns_to_idle() {
     // Enter normal, then use its bare q exit binding.
     let mut script = enter_normal();
     script.push(key_down("q"));
+    script.push(key_up("q"));
     let (mut backend, _) = FakeBackend::new(script);
     engine.run(&mut backend).unwrap();
 
@@ -90,6 +91,7 @@ fn escape_binding_returns_to_idle() {
 
     let mut script = enter_normal();
     script.push(key_down("q"));
+    script.push(key_up("q"));
     let (mut backend, _) = FakeBackend::new(script);
     engine.run(&mut backend).unwrap();
 

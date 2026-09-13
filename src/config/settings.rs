@@ -346,13 +346,7 @@ pub struct RecursiveGrid {
 
 impl Default for RecursiveGrid {
     fn default() -> Self {
-        let ui = RecursiveGridUi {
-            label: LabelUi {
-                font_size: 20,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
+        let ui = RecursiveGridUi::default();
         Self {
             enabled: true,
             grid_cols: 3,
@@ -415,7 +409,10 @@ pub struct RecursiveGridUi {
 impl Default for RecursiveGridUi {
     fn default() -> Self {
         Self {
-            label: LabelUi::default(),
+            label: LabelUi {
+                font_size: 0,
+                ..Default::default()
+            },
             line_width: 1,
             line_color: None,
             highlight_color: None,

@@ -1,5 +1,15 @@
 # 更新日志 / Release Notes
 
+## 0.10.6
+
+- 新增常用模式快速切换：操作模式中长按 `Q` 查看面板，按数字切换；支持使用统计、黑名单及面板样式配置。
+- 修复快速切换面板在高 DPI 下的重叠与边框异常；递归网格默认使用自动大字号。
+- 窗口卡片引导线支持开关、线宽、颜色和透明度配置，网页编辑器同步支持。
+
+- Added quick switching by mode usage: hold `Q` in an operating mode and press a number to switch, with usage statistics, a blacklist, and configurable panel styling.
+- Fixed overlapping text and unwanted borders in the quick-switch panel at high DPI; Recursive Grid now uses large automatic font sizing by default.
+- Added window card guide-line visibility, width, color, and opacity settings, also available in the web editor.
+
 ## 0.10.5
 
 - 拆分窗口最大化与最小化操作：`F` 切换最大化／还原，`Shift+F` 切换最小化／还原，不再经过三态循环。按键提示仍合并在一行。
