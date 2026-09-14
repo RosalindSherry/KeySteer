@@ -1,5 +1,9 @@
 # 核心运行时与公共 API
 
+直接 `Binding::Send` 通过 `repeats_on_key_down` 保留首次解析的 active gesture，并响应原生重复
+事件；它不属于 `is_held`，不持有输出键，也不创建 timer。重复解析要求原 owner 和编译 binding
+身份仍一致，避免前缀释放后切换到另一个同输出映射；字符绑定沿用字符优先解析。释放只清理 gesture。
+
 ## 模式统计与快速切换
 
 `set_active` 仅在模式 id 实际改变时向 PresetRepository 记录进入次数；同模式 keep/restart 不增加计数。计数保留在内存，达到配置次数后用容量为 1 的 mailbox 提交后台 checkpoint，满队列保留 dirty 状态等待下一次进入；不在几何／帧路径写盘，也没有统计保存定时器。预设编辑与统计写入共用写锁，读取最新文件后合并单调计数，原子替换完整工作区。正常退出等待 worker 并保存剩余计数；错误统一进入 logging。
@@ -79,8 +83,12 @@ Engine 复用 `WarpPointer` 同步物理鼠标、权威 cursor、拖动状态和
 macOS 原生全屏移动启动后也返回 `None`；后端保留窗口，按 poll 推进退出全屏、跨屏、恢复全屏，
 最终发送 `BackendEvent::WindowMoveCompleted(Result<Point, String>)`。Engine 只在成功时复用
 `WarpPointer`，失败只记录错误；后台窗口移动错误不作为输入注入失败清空键盘状态。
-组合键前缀在 `registry` 重编译时构建；`prefix_chords` 只持有尚未执行的动作及共享候选，
-不拥有系统资源、timer 或按键重放。它复用正常绑定执行路径并先完成原生 disposition 握手。
+组合键前缀在 `registry` 重编译时构建，包括没有独立绑定的非修饰前缀键索引。`prefix_chords`
+持有尚未执行的动作、共享候选及透传前缀原有的修饰键状态，不拥有原生资源或 timer。
+绑定前缀复用正常动作路径；透传前缀在松键或无关新键到来时补发，组合命中时取消。
+`input_state::dispose_input` 先完成原生 disposition 握手，再补发前缀；必要时接管后续无关键的
+Down/repeat/Up 重放以保持输入顺序；重放持有记录独立于用户 toggle，清理时转入 latched，
+复用其失败恢复和捕获丢失释放路径。
 
 `src/api/` 是唯一允许跨层传递的词汇：
 
@@ -104,6 +112,10 @@ Engine 的 Frame、指针、按键等通用热路径直接调用借用式 `Mode:
 后端可直接把它移入原生队列，不需要为了跨线程生命周期再次复制；同步后端的默认实现仍按
 顺序逐事件发送。完整 chord 使用带默认实现的 `Backend::send_chord`；内置 Windows 后端把
 最多 8 个原生键码内联进异步队列，macOS 直接按切片注入，均不构造 down/up 临时 Vec。
+映射发送按目标 chord 决定修饰键：Engine 从原生可见的物理按键中收集目标不需要的修饰键，
+通过 `Backend::send_chord_suspending` 在发送期间释放并恢复。目标已要求且物理按住的修饰键
+不重复 down/up；显式 press/toggle 持有的键保持原有语义。规则适用于任意映射和原生重复
+KeyDown，不依赖计时器；前缀失败后的原样回放不走此路径。
 `Backend::update_overlay_positions` 是完整 `present` 之后的可选快路径：Engine 只发送自己
 拥有的 cursor/indicator 新坐标；默认返回 `false`，未实现它的后端会自动退回完整场景。
 

@@ -1,5 +1,15 @@
 # 构建、打包、文档站与测试
 
+键盘映射原生重复回归：`keyboard_chord_mappings_repeat_with_native_events_and_stop_without_prefix`
+覆盖 C+H/J/K/L 连续输入、同输出裸键不接管与无新增 deadline；
+`direct_keyboard_mappings_repeat_and_release_without_an_extra_tap` 覆盖单键、带修饰键发送和释放后停止。
+
+无独立绑定的组合前缀回归位于 runtime 的 `window_mover.rs` 测试：覆盖任意前缀名称、三键组合、
+单键松开补发、无关输入排序、新前缀接续、修饰键释放顺序、原始字母模式、禁用候选、重复键与捕获丢失。
+`unavailable_unbound_prefixes_do_not_allocate_or_delay_ordinary_keys` 为 ignored 分配探针，需用
+`cargo test --lib unavailable_unbound_prefixes_do_not_allocate_or_delay_ordinary_keys -- --ignored --test-threads=1`
+单独执行；索引在配置编译时建立，测试确认普通键/缺失修饰键路径无分配，前缀不会新增 scheduler deadline。
+
 本地文档默认配置由 docs:sync 生成，ConfigStudio 必须通过 parseConfigDocument 加载完整 TOML；新增共享卡片字段需同步网页校验器。config-document.test.ts 覆盖完整默认文件加载，避免 UI 初始化失败后控件无效。快速切换预览复用既有 animation frame 检查长按，提供数字／点击选择与屏幕、窗口、鼠标定位；配置不写入浏览器草稿。
 
 模式统计与快速切换回归：`preset_store/usage.rs` 覆盖阈值前不落盘、阈值 checkpoint、退出补存、旧 snapshot 不回滚计数／布局和替换失败保护；Rust/TS 共用 `tests/fixtures/workspace-usage.ksw` 覆盖 v2、u64 最大值和逐字节截断，原 `workspace.ksw` 保留 v1 兼容验收。runtime 覆盖 Idle 透传、短按 Q、立即 Q+数字、固定排序、黑名单只影响面板、输入捕获丢失及不重复计数。presentation 验证负坐标屏幕、窗口中心和鼠标边缘夹取。跨平台编译检查不等于系统关机、注销实机验收；不得为验证自动触发用户系统退出。
@@ -19,6 +29,8 @@ Rust 与 TypeScript 使用同一 `tests/fixtures/workspace.ksw` 做逐字节往�
 布局收藏的 API 测试覆盖 9/4 区域与窗口数量不匹配、空区域及排序、备注/隐私字段；`app/preset_store` 测试覆盖二进制往返、逐字节截断、版本、持久化及写入失败不覆盖。runtime 测试覆盖 Ctrl+S、原生输入放行、R→编号恢复和会话取消后的迟到结果。Windows ignored `native_note_dialog_preserves_unicode_and_cancels_owned_windows` 在交互桌面创建并清理自有对话框，验证 Unicode 保存和取消；macOS 编译检查不能替代实机 IME 验证。网页 `window-presets.test.ts` 覆盖独立浏览器布局库与恢复撤销。
 
 ## 优化构建档位（2026-08）
+
+- 发布依赖缓存使用 `Swatinem/rust-cache@v2`：忽略 workspace 自身版本号，按依赖、实际 Rust 工具链、环境、host 和 matrix target 分区；包含 `target` 下 host/target 的依赖产物，排除 workspace 产物和 Cargo bin。仅默认分支保存，其他分支/标签只恢复可访问缓存，避免每个发布 ref 各存一份。`prefix-key: v1-release-deps` 标记缓存策略版本；脚本内 Windows `/Brepro` 和 macOS deployment target 也体现在自定义 key 中，修改这些编译条件时同步更新 key。首次切换需要预热，项目自身 release 编译和 LTO/链接仍正常执行；旧缓存不会由新工作流主动删除。
 
 - 通用发布保留目标默认 CPU baseline；版本变更应在提交前同步 Cargo.lock 中的 `keysteer` 根包版本。为避免只修改 Cargo.toml 导致正式打包失败，workflow 在每个原生 matrix runner 上先读取 manifest 版本，并用 `cargo update --package keysteer --precise <version>` 定向同步根包条目，不主动升级第三方依赖；后续打包仍使用 `--locked`。打包从 commit 生成 `SOURCE_DATE_EPOCH`，Windows 发布入口同时传递 `/Brepro`。
 - `tools/build-native.ps1` / `tools/build-native.sh` 仅构建 host architecture，使用独立 `target-native/` 和 `-C target-cpu=native`。
@@ -344,3 +356,9 @@ macOS 原生性能：`python3 tools/test-macos-windows.py --performance --releas
 
 
 卡片编辑区在 ModeStyleControls 中集中共享 card 与当前模式 ui 控件，CardPositionEditor 的拖动只更新 window.card.position，取消手势恢复先前值；positionFromPoints 测试覆盖反向拖动、点／线与百分比边界。CardStylePreview 随有效配置与主题响应式更新；颜色控件显示继承主题的真实默认颜色。
+# 映射修饰键回归
+
+`mapped_chords_*` 覆盖左右 Alt/Ctrl/Shift/Win 的全部非空组合、重复事件、释放无额外发送和
+显式目标修饰键。Windows `mapped_chord_*` 检查原生批次中方向键期间无多余修饰键、批次结束
+状态恢复、已松开的源键不恢复，以及常见组合的内联存储。Notepad4 原生验收应确认 Primary+J/K
+只移动光标，长按重复，松开 Alt 不打开菜单，未映射 Alt 快捷键仍有效。

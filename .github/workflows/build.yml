@@ -64,17 +64,16 @@ jobs:
         run: rustup target add ${{ matrix.target }}
 
       - name: Restore Rust release cache
-        uses: actions/cache@v6
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target/${{ matrix.target }}/release/build
-            target/${{ matrix.target }}/release/deps
-            target/${{ matrix.target }}/release/.fingerprint
-          key: ${{ runner.os }}-${{ matrix.target }}-rust-stable-release-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ matrix.target }}-rust-stable-release-
+          # Normalize workspace versions; cache dependencies, including host
+          # build scripts/proc macros, instead of a new copy per app release.
+          prefix-key: v1-release-deps
+          key: ${{ matrix.target }}-release-brepro
+          workspaces: . -> target
+          cache-bin: false
+          cache-workspace-crates: false
+          save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
 
       - name: Prepare Windows code-signing certificate
         shell: pwsh
@@ -139,17 +138,14 @@ jobs:
         run: rustup target add ${{ matrix.target }}
 
       - name: Restore Rust release cache
-        uses: actions/cache@v6
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target/${{ matrix.target }}/release/build
-            target/${{ matrix.target }}/release/deps
-            target/${{ matrix.target }}/release/.fingerprint
-          key: ${{ runner.os }}-${{ matrix.target }}-rust-stable-release-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ matrix.target }}-rust-stable-release-
+          prefix-key: v1-release-deps
+          key: ${{ matrix.target }}-release-macos14
+          workspaces: . -> target
+          cache-bin: false
+          cache-workspace-crates: false
+          save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
 
       - name: Package macOS ${{ matrix.arch }}
         shell: bash

@@ -204,6 +204,29 @@ pub trait Backend {
         self.send_keys(events)
     }
 
+    /// Send a mapped chord without inheriting the listed physical source
+    /// modifiers. Restore suspended modifiers even if chord injection fails.
+    /// Native batching backends should override this to keep the whole
+    /// transition in one input request and recheck physical state on execution.
+    fn send_chord_suspending(&self, keys: &[Key], modifiers: &[Key]) -> Result<(), String> {
+        use super::input::KeyState;
+        let mut errors = crate::support::errors::ErrorBundle::default();
+        let result = (|| {
+            for modifier in modifiers.iter().rev() {
+                self.send_key(modifier, KeyState::Up)?;
+            }
+            self.send_chord(keys)
+        })();
+        errors.record("mapped chord", result);
+        for modifier in modifiers {
+            errors.record(
+                "restore source modifier",
+                self.send_key(modifier, KeyState::Down),
+            );
+        }
+        errors.into_result()
+    }
+
     /// Start or stop native display-synchronised frame delivery.
     ///
     /// Backends without a display-link implementation may reject activation;

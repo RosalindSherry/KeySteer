@@ -129,11 +129,18 @@ pub(super) enum InjectionRequest {
     },
     Keys(Vec<(Key, KeyState)>),
     Chord(input::KeyChordBatch),
+    MappedChord {
+        chord: input::KeyChordBatch,
+        modifiers: input::KeyChordBatch,
+    },
 }
 
 impl InjectionRequest {
     fn execute(self) -> Result<(), String> {
         match self {
+            Self::MappedChord { chord, modifiers } => {
+                input::send_chord_suspending(&chord, &modifiers, PRESSED.with(Cell::get))
+            }
             Self::MouseButton { button, action } => match input::mouse_button(button, action) {
                 Ok(()) => Ok(()),
                 Err(error) if matches!(action, ButtonAction::Click | ButtonAction::DoubleClick) => {

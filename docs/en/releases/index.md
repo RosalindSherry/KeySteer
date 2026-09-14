@@ -1,5 +1,9 @@
 # Release notes
 
+## 0.10.8
+
+- Fixed premature passthrough of custom chord prefixes. 
+
 ## 0.10.7
 
 - Fixed oversized quick-switch panels and misaligned mode names on macOS Retina displays.

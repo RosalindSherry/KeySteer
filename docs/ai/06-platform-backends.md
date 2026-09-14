@@ -144,6 +144,10 @@ timer，在回调之间安装新句柄并释放旧句柄；安装失败保留原
   请求中，再生成最多 16 个栈内 `INPUT`；超长序列才分配。虚拟键正向查找由同一份定义表
   生成编译期 `match`，不在线性表中逐项搜索，也不维护第二份运行时 map。
 - 物理左右 Alt 始终立即透传，不延迟也不回放，因此 AHK、Quicker 和 `Alt+物理鼠标键` 能看到真实状态。若随后一个明确绑定的非修饰键被消费，Hook 将带自身标记的未分配 `0xE8` down/up 排入自己的消息循环，回调返回后再发送，以阻止 Alt 松开时激活菜单；失败只报告非致命 warning。
+- 映射发送使用 `MappedChord` 队列请求，Hook 执行时核对物理 ledger，仅恢复仍按住的源修饰键。
+  释放多余修饰键、目标 chord、恢复源修饰键在一次 `SendInput` 中完成；Alt/Win 两侧加入菜单
+  mask，避免内部状态恢复触发菜单。部分注入失败时释放目标键并恢复源修饰键；常见组合仍使用
+  栈内 INPUT，无定时等待。适用于左右 Alt/Ctrl/Shift/Win 的任意组合及每次系统重复事件。
 - `accessibility.rs` 是持久 COM MTA UIA worker，并在 MTA 内复用只读 query plan。
 - `vision.rs` 在 backend ready 后的首次事件轮询派发一次低优先级 OCR discovery，缓存系统语言/尺寸与微信绝对路径/文件标识，探测线程结束前不保留引擎或 helper。每次扫描从快照生成 `None`/`SystemOnly`/`WechatOnly`/`Dual` 内部计划；系统单路不会构造任何微信 bitmap、WIC、PNG、helper、job、pipe 或 reader。WinRT OCR/WIC 使用 generation-owned activation factory，不能依赖跨临时 COM apartment 的投影静态缓存。视觉 coordinator 按请求懒启动；每次扫描只拥有计划需要且可取消、可 join 的 provider，当前与 latest pending generation 完成后 coordinator 退出。`ui_scan.rs` 统一流式发布和空间去重；`wechat_ocr.rs` 只在 generation-scoped 隐藏 helper 中加载可选桥接 DLL。
 - capture 使用 generation 栈上的 `PreparedCapture`，CPU overlay 使用线程绑定 `GdiDibSurface`；两者共用带长度验证的 DIB/DC owner，selected-object guard 通过 Rust 生命周期绑定所属 surface。微信 helper 创建后立即加入 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` job；取消、超时或上下文变化跳过 graceful 等待并终止子进程，reader/pipe/PNG 都在 terminal 前回收。PNG 只写入带独占 owner lock 的进程私有临时目录，启动下一次编码时只清扫确认没有活跃 owner 的同名目录。

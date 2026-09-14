@@ -31,6 +31,42 @@ pub(super) struct CompiledKeymap {
     prefixes: BTreeMap<Key, Vec<CompiledPrefix>>,
 }
 
+/// Reserve non-modifier chord members even when they have no standalone binding.
+/// Keep this separate from real bindings so inheritance, `none`, and help output
+/// continue to describe only the user's configured actions.
+pub(super) fn compile_unbound_prefixes(
+    candidates: &[ChordContinuation],
+) -> BTreeMap<Key, CompiledPrefix> {
+    let mut by_key: BTreeMap<Key, Vec<ChordContinuation>> = BTreeMap::new();
+    for candidate in candidates {
+        for key in candidate.chord.keys() {
+            if !key.is_modifier()
+                && !key.is_mouse_side_button()
+                && key != candidate.chord.activation_key()
+            {
+                by_key
+                    .entry(key.clone())
+                    .or_default()
+                    .push(candidate.clone());
+            }
+        }
+    }
+    by_key
+        .into_iter()
+        .filter_map(|(key, continuations)| {
+            let chord = Arc::new(KeyChord::parse(key.as_str()).ok()?);
+            Some((
+                key,
+                CompiledPrefix {
+                    binding: Arc::new(Binding::Send((*chord).clone())),
+                    chord,
+                    continuations: continuations.into(),
+                },
+            ))
+        })
+        .collect()
+}
+
 impl CompiledKeymap {
     pub(super) fn iter_entries(&self) -> impl Iterator<Item = &CompiledBinding> {
         self.by_activation.values().flatten()

@@ -284,7 +284,7 @@ mod tests {
         assert!(key.left() - panel.left() > panel.right() - longest.right());
         assert!(panel.right() - longest.right() >= 9.0 * expected_scale);
         let caption_left = rendered(&scene.labels[2]).left();
-        for row in scene.labels[1..].chunks_exact(2) {
+        for row in scene.labels[1..].as_chunks::<2>().0 {
             let caption = rendered(&row[1]);
             assert!((caption.left() - caption_left).abs() < 1.0);
             assert!(caption.bottom() <= panel.bottom());
@@ -318,7 +318,7 @@ mod tests {
             let scale = super::super::label_scale(scale);
             let mut bottom = 0.0;
             let mut left = None;
-            for row in scene.labels[1..].chunks_exact(2) {
+            for row in scene.labels[1..].as_chunks::<2>().0 {
                 let (key, key_scale) = crate::api::overlay::scaled_label_geometry(
                     &row[0].text,
                     row[0].rect,

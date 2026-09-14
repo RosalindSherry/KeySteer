@@ -434,6 +434,12 @@ impl Binding {
         }
     }
 
+    /// Direct keyboard mappings follow native key-repeat events without owning
+    /// a held output key. Discrete actions and scripted sends stay one-shot.
+    pub(crate) fn repeats_on_key_down(&self) -> bool {
+        self.is_held() || matches!(self, Self::Send(_))
+    }
+
     /// The mode this binding enters, if any.
     pub fn mode(&self) -> Option<&ModeId> {
         match self {

@@ -749,6 +749,13 @@ impl Backend for WindowsBackend {
         self.inject_input(hook::InjectionRequest::Chord(chord))
     }
 
+    fn send_chord_suspending(&self, keys: &[Key], modifiers: &[Key]) -> Result<(), String> {
+        self.inject_input(hook::InjectionRequest::MappedChord {
+            chord: input::KeyChordBatch::new(keys)?,
+            modifiers: input::KeyChordBatch::new(modifiers)?,
+        })
+    }
+
     fn set_frame_clock(&mut self, active: bool) -> Result<(), String> {
         if active {
             if let Ok(pointer) = input::cursor_position() {

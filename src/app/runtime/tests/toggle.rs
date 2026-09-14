@@ -45,7 +45,7 @@ fn modifier_plus_bare_toggle_latches_that_modifier() {
 }
 
 #[test]
-fn every_toggle_target_survives_its_forwarded_physical_key_release() {
+fn every_toggle_target_survives_forwarded_or_consumed_physical_key_release() {
     for (target, chord, binding, injected) in [
         ("left_ctrl", "ctrl+n", "toggle ctrl", "left_ctrl"),
         (
@@ -97,11 +97,8 @@ fn every_toggle_target_survives_its_forwarded_physical_key_release() {
         );
         assert_eq!(
             log.lock().unwrap().sent,
-            vec![
-                (injected.into(), KeyState::Down),
-                (injected.into(), KeyState::Down),
-            ],
-            "the forwarded physical Up must be followed by one synthetic Down; target={target}"
+            vec![(injected.into(), KeyState::Down); if target == "e" { 1 } else { 2 }],
+            "only a forwarded modifier Up needs reassertion; the nonmodifier chord prefix was consumed; target={target}"
         );
 
         for event in [key_down(target), key_down("n"), key_up("n"), key_up(target)] {
@@ -547,16 +544,23 @@ fn parameterless_toggle_treats_speed_keys_as_physical_partners_in_both_orders() 
         let (mut backend, _log) = FakeBackend::new(Vec::new());
 
         for key in order {
-            engine.handle_backend_event(key_down(key), &mut backend).unwrap();
+            engine
+                .handle_backend_event(key_down(key), &mut backend)
+                .unwrap();
         }
         for key in order.iter().rev() {
-            engine.handle_backend_event(key_up(key), &mut backend).unwrap();
+            engine
+                .handle_backend_event(key_up(key), &mut backend)
+                .unwrap();
         }
 
-        assert!(engine
-            .input
-            .latched
-            .contains(&InputTarget::Key(Key::new("left_shift").unwrap())), "order={order:?}");
+        assert!(
+            engine
+                .input
+                .latched
+                .contains(&InputTarget::Key(Key::new("left_shift").unwrap())),
+            "order={order:?}"
+        );
         assert_eq!(
             engine.overlay.speed_toggle,
             (order[0] == "left_shift").then_some(crate::api::Speed::Slow),
@@ -1160,4 +1164,3 @@ fn random_wait_stays_inside_the_inclusive_range() {
     }
     assert_eq!(random_wait_ms(25, 25), 25);
 }
-

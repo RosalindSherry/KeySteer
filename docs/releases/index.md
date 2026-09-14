@@ -1,5 +1,11 @@
 # 更新日志 / Release Notes
 
+## 0.10.8
+
+- 修复自定义组合键的前缀字符提前透传的问题，
+
+- Fixed premature passthrough of custom chord prefixes. 
+
 ## 0.10.7
 
 - 修复 macOS Retina 屏幕上快速切换面板过大、模式名称对齐错位的问题。

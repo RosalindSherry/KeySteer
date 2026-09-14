@@ -131,11 +131,22 @@ resolver 检查候选在当前继承、temporary mode、`none` 和修饰键侧�
 匹配短组合后消费输入并保存 Arc 候选；长组合完成时取消短组合，任一短组合成员释放时才执行
 仍挂起的短动作。嵌套前缀使用同一规则，不使用固定延迟、timer 或全表逐键扫描。
 
+未绑定的非修饰前缀也在配置编译时单独建立索引，不向用户绑定表或帮助面板添加隐式动作。
+原本会透传的键只有在当前 resolver 确认存在有效长组合时才暂缓 Down；例如 `c+h` 中的 C。
+组合命中后不输出 C，单独 C 在松键时补发，无关新键到来时立即先补发 C，保持输入次序。
+原本需要原始字母的 Grid/Hint 等捕获模式继续处理自己的字母；普通键和没有按齐修饰键的
+候选不等待。原生握手先于补发，重放的 Down/repeat/Up 保持配对，不增加计时器。
+
 冲突的短 click 不启动长按 MouseDown，held 动作在释放时按完整 Down/Up 处理。连续移动、速度
 或 toggle 最好使用没有长组合的键。模式切换、有效配置/应用覆盖重编译、禁用和输入恢复取消
 pending；无效 Reload 保留最后有效计划及 pending。Down/Up 仍使用既有 disposition 配对。
 
 ## Binding 语法
+
+直接键盘映射（例如 `c+h = "arrow_left"`、`x = "backspace"` 或 `send shift+arrow_left`）
+响应系统原生 KeyDown repeat，重复延迟和频率沿用系统设置，不创建重复计时器。每次 repeat
+仍须命中首次按下的同一份编译绑定；松开前缀后不回退到裸键绑定。KeyUp 不额外发送一次按键。
+点击、模式切换、toggle 和脚本序列中的离散动作继续只触发一次，`is_held` 的按下/释放语义不变。
 
 `src/api/binding.rs::Binding` 同时是配置动作、内部动作和插件动作。解析顺序大致为：
 
@@ -277,3 +288,8 @@ Editor 仅覆盖位置：在 [window_editor.card] 设置 position 和可选的 p
 
 
 WindowStyles 编译边界进一步收敛：不再保存原始 WindowCardUi，仅保存数值 WindowCardMetrics、比例与已解析样式。原始配置仍由 ConfigFile 保留用于导出与重载。
+# 映射目标的修饰键
+
+`"primary+j" = "arrow_down"` 输出不带物理 Primary 的方向键；目标写为 `ctrl+arrow_down`
+才保留 Ctrl。相同规则适用于任意修饰键组合与左右键，长按仍跟随系统重复。显式 press/toggle
+持有的修饰键保留其状态，未匹配的组合继续按原规则透传。

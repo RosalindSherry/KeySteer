@@ -1770,8 +1770,9 @@ impl Engine {
             // Still consume the release so the app never sees half a gesture.
             return Ok(true);
         }
-        // Auto-repeat must not re-trigger a discrete action.
-        if input.repeat && !binding.is_held() {
+        // Direct key mappings follow native repeats; clicks and other discrete
+        // actions still fire once. No synthetic repeat timer is needed.
+        if input.repeat && !binding.repeats_on_key_down() {
             return Ok(true);
         }
 

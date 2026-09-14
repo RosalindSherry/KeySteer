@@ -585,6 +585,74 @@ pub(super) fn send_chord(chord: &KeyChordBatch) -> Result<(), String> {
     }
 }
 
+/// The hook thread rechecks its physical ledger when this queued request runs.
+/// A modifier released since the engine resolved the mapping must not be
+/// restored from the stale engine snapshot.
+pub(super) fn send_chord_suspending(
+    chord: &KeyChordBatch,
+    modifiers: &KeyChordBatch,
+    physical: [u64; 4],
+) -> Result<(), String> {
+    let modifiers = live_modifiers(modifiers.as_slice(), physical);
+    if modifiers.is_empty() {
+        return send_chord(chord);
+    }
+    let keys = chord.as_slice();
+    let inputs = mapped_chord_inputs(keys, &modifiers);
+    let failure = match try_send(inputs.as_slice()) {
+        Ok(()) => return Ok(()),
+        Err(failure) => failure,
+    };
+    // Unlike ordinary chords, physical source modifiers must be restored,
+    // rather than added to the compensatory release set.
+    let recovery = KeyInputBatch::from_native_events(
+        keys.iter()
+            .rev()
+            .map(|key| (*key, KeyState::Up))
+            .chain(modifiers.iter().map(|key| (*key, KeyState::Down)))
+            .chain(menu_mask_events(&modifiers)),
+    );
+    match send(recovery.as_slice()) {
+        Ok(()) => Err(failure.message()),
+        Err(error) => Err(format!(
+            "{}; mapped chord recovery failed: {error}",
+            failure.message()
+        )),
+    }
+}
+
+fn live_modifiers(modifiers: &[u16], physical: [u64; 4]) -> smallvec::SmallVec<[u16; 8]> {
+    modifiers
+        .iter()
+        .copied()
+        .filter(|key| {
+            *key < 256 && physical[*key as usize / 64] & (1u64 << (*key as usize % 64)) != 0
+        })
+        .collect()
+}
+
+fn menu_mask_events(modifiers: &[u16]) -> impl Iterator<Item = (u16, KeyState)> {
+    let needs_mask = modifiers
+        .iter()
+        .any(|key| matches!(key, 0xA4 | 0xA5 | 0x5B | 0x5C));
+    [(0xE8, KeyState::Down), (0xE8, KeyState::Up)]
+        .into_iter()
+        .take(if needs_mask { 2 } else { 0 })
+}
+
+fn mapped_chord_inputs(keys: &[u16], modifiers: &[u16]) -> KeyInputBatch {
+    // Mask both sides of an Alt/Win suspension so neither the temporary Up
+    // nor the eventual physical Up activates an application/Start menu.
+    KeyInputBatch::from_native_events(
+        menu_mask_events(modifiers)
+            .chain(modifiers.iter().rev().map(|key| (*key, KeyState::Up)))
+            .chain(keys.iter().map(|key| (*key, KeyState::Down)))
+            .chain(keys.iter().rev().map(|key| (*key, KeyState::Up)))
+            .chain(modifiers.iter().map(|key| (*key, KeyState::Down)))
+            .chain(menu_mask_events(modifiers)),
+    )
+}
+
 /// Tell Windows that a forwarded Alt participated in a shortcut whose action
 /// KeySteer consumed. `0xE8` is unassigned, so the tagged pair cannot type or
 /// recursively enter our hook, but it prevents Alt-up from opening a menu.
@@ -658,6 +726,23 @@ enum KeyInputBatch {
 }
 
 impl KeyInputBatch {
+    fn from_native_events(events: impl Iterator<Item = (u16, KeyState)>) -> Self {
+        let mut inputs = std::array::from_fn(|_| INPUT::default());
+        let mut len = 0;
+        let mut events = events;
+        while let Some((key, state)) = events.next() {
+            if len == INLINE_KEY_INPUTS {
+                let mut heap = inputs.to_vec();
+                heap.push(virtual_key_input(key, state));
+                heap.extend(events.map(|(key, state)| virtual_key_input(key, state)));
+                return Self::Heap(heap);
+            }
+            inputs[len] = virtual_key_input(key, state);
+            len += 1;
+        }
+        Self::Inline { inputs, len }
+    }
+
     fn new(events: &[(Key, KeyState)]) -> Result<Self, String> {
         if events.len() <= INLINE_KEY_INPUTS {
             let mut inputs = std::array::from_fn(|_| INPUT::default());
@@ -999,6 +1084,50 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    #[test]
+    fn mapped_chord_batches_clear_and_restore_all_modifier_combinations() {
+        for codes in [[0xA2, 0xA4, 0xA0, 0x5B], [0xA3, 0xA5, 0xA1, 0x5C]] {
+            for mask in 1..16 {
+                let modifiers: Vec<_> = codes
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(bit, _)| mask & (1 << bit) != 0)
+                    .map(|(_, code)| code)
+                    .collect();
+                let batch = mapped_chord_inputs(&[0x28], &modifiers);
+                assert!(matches!(batch, KeyInputBatch::Inline { .. }));
+                let mut held = modifiers.clone();
+                let mut arrows = 0;
+                for input in batch.as_slice() {
+                    // SAFETY: mapped_chord_inputs constructs only INPUT_KEYBOARD values.
+                    let key = unsafe { input.Anonymous.ki };
+                    let code = key.wVk.0;
+                    if code == 0xE8 {
+                        continue;
+                    }
+                    if code == 0x28 {
+                        assert!(held.is_empty(), "arrow inherited {held:?}");
+                        arrows += 1;
+                    } else if key.dwFlags.contains(KEYEVENTF_KEYUP) {
+                        held.retain(|key| *key != code);
+                    } else {
+                        held.push(code);
+                    }
+                }
+                assert_eq!(arrows, 2);
+                assert_eq!(held, modifiers);
+            }
+        }
+    }
+
+    #[test]
+    fn mapped_chord_does_not_restore_released_source_modifiers() {
+        let mut physical = [0u64; 4];
+        physical[0xA3 / 64] |= 1 << (0xA3 % 64);
+        assert_eq!(live_modifiers(&[0xA3, 0xA4], physical).as_slice(), &[0xA3]);
+        assert!(live_modifiers(&[0xA3, 0xA4], [0; 4]).is_empty());
     }
 
     #[test]

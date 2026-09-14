@@ -32,6 +32,7 @@ pub(super) struct ModeRegistry {
     pub(super) active_slot: Option<usize>,
     pub(super) binding_profile_key: Vec<Bindings>,
     pub(super) prefixes_require_modifier: bool,
+    pub(super) unbound_prefixes: BTreeMap<crate::api::Key, super::input_router::CompiledPrefix>,
     pub(super) character_keys: HashMap<char, crate::api::Key>,
     #[cfg(test)]
     pub(super) table_rebuild_count: usize,
@@ -50,6 +51,7 @@ impl Default for ModeRegistry {
             active_slot: None,
             binding_profile_key: Vec::new(),
             prefixes_require_modifier: true,
+            unbound_prefixes: BTreeMap::new(),
             character_keys: HashMap::new(),
             #[cfg(test)]
             table_rebuild_count: 0,
@@ -437,6 +439,8 @@ impl Engine {
                 .iter()
                 .any(crate::api::Key::is_modifier)
         });
+        self.registry.unbound_prefixes =
+            super::input_router::compile_unbound_prefixes(&continuations);
         for id in self.binding_mode_ids() {
             if let Some(table) = self.registry.table_mut_or_default(&id) {
                 table.compile_prefixes(&continuations);

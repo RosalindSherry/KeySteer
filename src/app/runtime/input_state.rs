@@ -301,6 +301,8 @@ pub(super) struct InputState {
     pub(super) pressed: PressedKeys,
     pub(super) temporary_entry_keys: SmallVec<[Key; 8]>,
     pub(super) key_dispositions: KeyMap<KeyDisposition>,
+    // Physical edges consumed to replay an interrupted prefix before this key.
+    pub(super) replayed_keys: PressedKeys,
     pub(super) active_gestures: KeyMap<ActiveGesture>,
     pub(super) active_click_indicators: ActiveClickIndicators,
     pub(super) latched: LatchedTargets,
@@ -327,6 +329,8 @@ impl InputState {
         self.pressed.clear();
         self.temporary_entry_keys.clear();
         self.key_dispositions.clear();
+        // replayed_keys owns synthetic Downs; release_latched drains it even
+        // when physical capture is gone and no matching Up can arrive.
     }
 }
 
@@ -594,6 +598,15 @@ impl Engine {
                 Some(self.temporary_mode_is_active(&self.registry.active));
         }
 
+        if self.input.replayed_keys.contains(&input.key) {
+            let outcome = self.complete_key_disposition(&input, KeyOutcome::Consumed);
+            self.dispose_input(&input, outcome, trace_key, backend)?;
+            if input.state == KeyState::Up && self.has_released_prefix() {
+                self.commit_released_prefixes(backend)?;
+            }
+            return Ok(());
+        }
+
         if !self.enabled || self.is_excluded_app() || self.window_presets.pending.is_some() {
             self.input.pending_chords.clear();
             if let Some(pending) = completed_long_press
@@ -686,6 +699,18 @@ impl Engine {
                 // Volume repeats require the complete configured chord to stay
                 // pressed. Releasing V must not continue changing app audio.
                 .filter(|gesture| {
+                    if matches!(gesture.binding.as_ref(), Binding::Send(_)) {
+                        // The same compiled source binding must still match.
+                        // Never fall back to bare H after C+H loses its prefix,
+                        // even if both bindings happen to send the same key.
+                        return self
+                            .lookup_character(&input)
+                            .or_else(|| self.lookup(&input.key))
+                            .is_some_and(|resolved| {
+                                resolved.owner == gesture.owner
+                                    && Arc::ptr_eq(&resolved.binding, &gesture.binding)
+                            });
+                    }
                     !matches!(
                         gesture.binding.as_ref(),
                         Binding::Window(
@@ -779,7 +804,7 @@ impl Engine {
             // Remember both the binding and its recipient so a release stops a
             // normal gesture even while grid, recursive_grid or ui_hint remains
             // the active mode.
-            if input.state == KeyState::Down && resolved.binding.is_held() {
+            if input.state == KeyState::Down && resolved.binding.repeats_on_key_down() {
                 self.input.active_gestures.insert(
                     input.key.clone(),
                     ActiveGesture {
@@ -870,6 +895,16 @@ impl Engine {
                 .map(|m| m.captures_keyboard())
                 .unwrap_or(false);
 
+        if !captures
+            && input.state == KeyState::Down
+            && !input.repeat
+            && pressed_changed
+            && self.defer_unbound_prefix(&input.key)
+        {
+            let outcome = self.complete_key_disposition(&input, KeyOutcome::Consumed);
+            return self.dispose_input(&input, outcome, trace_key, backend);
+        }
+
         let outcome = if captures {
             KeyOutcome::Consumed
         } else {
@@ -908,13 +943,48 @@ impl Engine {
         trace_key: bool,
         backend: &mut dyn Backend,
     ) -> Result<(), String> {
+        let flush_prefixes = !input.injected && self.passthrough_prefix_interrupted(input);
+        let replay = !input.injected
+            && (self.input.replayed_keys.contains(&input.key)
+                || (flush_prefixes && matches!(outcome, KeyOutcome::Forwarded)));
         let disposition = match outcome {
+            _ if replay => KeyDisposition::Consume,
             KeyOutcome::Consumed => KeyDisposition::Consume,
             KeyOutcome::Forwarded => KeyDisposition::Forward,
         };
+        if replay && input.state == KeyState::Down {
+            self.input
+                .key_dispositions
+                .insert(input.key.clone(), KeyDisposition::Consume);
+        }
         backend
             .dispose_key(disposition)
             .map_err(|error| self.recoverable_input_error("keyboard disposition", error))?;
+        // Publish the native decision before injection. An unrelated forwarded
+        // key must join the replay so its Down cannot overtake the prefix.
+        if flush_prefixes {
+            self.flush_passthrough_prefixes(Some(&input.key), backend)?;
+        }
+        if replay {
+            let target = Self::replay_target(&input.key);
+            match input.state {
+                KeyState::Down => {
+                    self.input.replayed_keys.insert_ref(&input.key);
+                    Self::inject_target(&target, KeyState::Down, backend).map_err(|error| {
+                        self.recoverable_input_error("replayed key press", error)
+                    })?;
+                }
+                KeyState::Up => {
+                    // Explicit press/toggle ownership survives a consumed Up.
+                    if self.matching_latched_target(&target).is_none() {
+                        Self::inject_target(&target, KeyState::Up, backend).map_err(|error| {
+                            self.recoverable_input_error("replayed key release", error)
+                        })?;
+                    }
+                    self.input.replayed_keys.remove(&input.key);
+                }
+            }
+        }
         if let Some(active) = self.input.window_temporary_transition.take()
             && self.registry.active.is_window()
         {
@@ -1430,8 +1500,22 @@ impl Engine {
     }
 
     pub(super) fn release_latched(&mut self, backend: &mut dyn Backend) -> Result<(), String> {
+        // Transfer transient replay ownership only during cleanup; normal
+        // typing must not look like a user-created toggle latch.
+        self.input
+            .latched
+            .extend(self.input.replayed_keys.iter().map(Self::replay_target));
+        self.input.replayed_keys.clear();
         let held: TargetBuffer = self.input.latched.iter().cloned().collect();
         self.release_targets(&held, false, backend)
+    }
+
+    fn replay_target(key: &Key) -> InputTarget {
+        match key.as_str() {
+            "mouse_x1" => InputTarget::Mouse(crate::api::binding::Button::X1),
+            "mouse_x2" => InputTarget::Mouse(crate::api::binding::Button::X2),
+            _ => InputTarget::Key(key.clone()),
+        }
     }
 
     pub(super) fn release_toggle_session_for_safe_mode(
@@ -1462,14 +1546,50 @@ impl Engine {
         chord: &KeyChord,
         backend: &mut dyn Backend,
     ) -> Result<(), String> {
-        // Do not emit an Up edge for a modifier held by `press`/`toggle`.
+        // Only native-visible physical modifiers can leak into the target.
+        // Explicit press/toggle latches intentionally remain active.
+        let physical_modifiers: SmallVec<[Key; 8]> = self
+            .input
+            .pressed
+            .iter()
+            .filter(|key| {
+                key.is_modifier()
+                    && (self.input.key_dispositions.get(key) == Some(&KeyDisposition::Forward)
+                        || self.input.replayed_keys.contains(key))
+            })
+            .cloned()
+            .collect();
+        let suspended: SmallVec<[Key; 8]> = physical_modifiers
+            .iter()
+            .filter(|key| {
+                !self.latched_key_matches(key)
+                    && !chord
+                        .keys()
+                        .iter()
+                        .any(|target| Self::keys_match(target, key))
+            })
+            .cloned()
+            .collect();
+        // Do not emit an Up for a target modifier already held physically or
+        // by press/toggle; it is already part of the application's key state.
         let keys: SmallVec<[Key; 8]> = chord
             .keys()
             .iter()
-            .filter(|key| !self.latched_key_matches(key))
+            .filter(|key| {
+                !self.latched_key_matches(key)
+                    && !(key.is_modifier()
+                        && physical_modifiers
+                            .iter()
+                            .any(|held| Self::keys_match(key, held)))
+            })
             .map(Self::injected_key)
             .collect();
-        if let Err(error) = backend.send_chord(&keys) {
+        let result = if suspended.is_empty() {
+            backend.send_chord(&keys)
+        } else {
+            backend.send_chord_suspending(&keys, &suspended)
+        };
+        if let Err(error) = result {
             // A batch failure may mean that Windows accepted only a prefix.
             // Record every member conservatively; redundant key-up events are
             // harmless and safer than leaving a modifier held.

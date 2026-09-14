@@ -9,6 +9,8 @@ pub(super) struct PendingChord {
     chord: Arc<KeyChord>,
     resolved: ResolvedBinding,
     continuations: Arc<[ChordContinuation]>,
+    passthrough: bool,
+    forwarded_modifiers: SmallVec<[Key; 4]>,
 }
 
 impl Engine {
@@ -83,8 +85,105 @@ impl Engine {
             chord: entry.chord.clone(),
             resolved: resolved.clone(),
             continuations: entry.continuations.clone(),
+            passthrough: false,
+            forwarded_modifiers: SmallVec::new(),
         });
         true
+    }
+
+    pub(super) fn defer_unbound_prefix(&mut self, key: &Key) -> bool {
+        let Some(entry) = self.registry.unbound_prefixes.get(key) else {
+            return false;
+        };
+        if !entry
+            .continuations
+            .iter()
+            .any(|candidate| self.continuation_is_available(&entry.chord, candidate))
+        {
+            return false;
+        }
+        let forwarded_modifiers = self
+            .input
+            .pressed
+            .iter()
+            .filter(|key| {
+                key.is_modifier()
+                    && (self.input.key_dispositions.get(key) == Some(&KeyDisposition::Forward)
+                        || self.input.replayed_keys.contains(key))
+            })
+            .cloned()
+            .collect();
+        self.input.pending_chords.push(PendingChord {
+            key: key.clone(),
+            chord: entry.chord.clone(),
+            resolved: ResolvedBinding {
+                binding: entry.binding.clone(),
+                owner: self.registry.active.clone(),
+            },
+            continuations: entry.continuations.clone(),
+            passthrough: true,
+            forwarded_modifiers,
+        });
+        true
+    }
+
+    pub(super) fn passthrough_prefix_interrupted(
+        &self,
+        input: &crate::api::input::InputEvent,
+    ) -> bool {
+        input.state == KeyState::Down
+            && !input.repeat
+            && self.input.pending_chords.iter().any(|pending| {
+                pending.passthrough
+                    && pending.key != input.key
+                    && !pending.continuations.iter().any(|candidate| {
+                        candidate
+                            .chord
+                            .keys()
+                            .iter()
+                            .any(|key| Self::keys_match(key, &input.key))
+                            && self.continuation_is_available(&pending.chord, candidate)
+                    })
+            })
+    }
+
+    fn replay_prefix(
+        &mut self,
+        pending: PendingChord,
+        backend: &mut dyn Backend,
+    ) -> Result<(), String> {
+        // Already-forwarded modifiers still physically held must not receive a
+        // synthetic Up. Recreate only original modifiers that have since lifted.
+        let mut keys: SmallVec<[Key; 8]> = pending
+            .forwarded_modifiers
+            .into_iter()
+            .filter(|key| !self.input.pressed.contains(key))
+            .collect();
+        keys.push(pending.key);
+        if let Err(error) = backend.send_chord(&keys) {
+            self.input
+                .latched
+                .extend(keys.into_iter().map(InputTarget::Key));
+            return Err(self.recoverable_input_error("prefix replay", error));
+        }
+        Ok(())
+    }
+
+    pub(super) fn flush_passthrough_prefixes(
+        &mut self,
+        preserve: Option<&Key>,
+        backend: &mut dyn Backend,
+    ) -> Result<(), String> {
+        while let Some(index) = self
+            .input
+            .pending_chords
+            .iter()
+            .position(|pending| pending.passthrough && preserve != Some(&pending.key))
+        {
+            let pending = self.input.pending_chords.remove(index);
+            self.replay_prefix(pending, backend)?;
+        }
+        Ok(())
     }
 
     pub(super) fn cancel_completed_prefixes(&mut self, resolved: &ResolvedBinding) {
@@ -105,10 +204,13 @@ impl Engine {
     }
 
     pub(super) fn has_released_prefix(&self) -> bool {
-        self.input
-            .pending_chords
-            .iter()
-            .any(|pending| !pending.chord.matches_pressed(&self.input.pressed))
+        self.input.pending_chords.iter().any(|pending| {
+            !pending.chord.matches_pressed(&self.input.pressed)
+                || pending
+                    .forwarded_modifiers
+                    .iter()
+                    .any(|key| !self.input.pressed.contains(key))
+        })
     }
 
     /// The caller has already disposed the native Up. Reuse normal action
@@ -118,6 +220,16 @@ impl Engine {
         backend: &mut dyn Backend,
     ) -> Result<(), String> {
         let active = self.registry.active.clone();
+        if self.input.pending_chords.iter().any(|pending| {
+            pending.passthrough
+                && (!pending.chord.matches_pressed(&self.input.pressed)
+                    || pending
+                        .forwarded_modifiers
+                        .iter()
+                        .any(|key| !self.input.pressed.contains(key)))
+        }) {
+            self.flush_passthrough_prefixes(None, backend)?;
+        }
         while let Some(index) = self
             .input
             .pending_chords

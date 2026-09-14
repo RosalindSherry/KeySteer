@@ -379,13 +379,15 @@ fn custom_long_chords_match_including_modifierless_chords() {
         script.extend(keys.iter().rev().map(|key| key_up(key)));
         let (mut backend, log) = FakeBackend::new(script);
         engine.run(&mut backend).unwrap();
-        assert_eq!(
-            log.lock().unwrap().sent,
-            [
-                ("home".into(), KeyState::Down),
-                ("home".into(), KeyState::Up)
-            ]
-        );
+        let mut expected = vec![
+            ("home".into(), KeyState::Down),
+            ("home".into(), KeyState::Up),
+        ];
+        if keys.contains(&"left_ctrl") {
+            expected.insert(0, ("left_ctrl".into(), KeyState::Up));
+            expected.push(("left_ctrl".into(), KeyState::Down));
+        }
+        assert_eq!(log.lock().unwrap().sent, expected);
     }
 }
 
@@ -566,8 +568,10 @@ fn opposite_side_long_chords_do_not_change_a_generic_short_chord() {
     assert_eq!(
         log.lock().unwrap().sent,
         [
+            ("right_alt".into(), KeyState::Up),
             ("home".into(), KeyState::Down),
-            ("home".into(), KeyState::Up)
+            ("home".into(), KeyState::Up),
+            ("right_alt".into(), KeyState::Down)
         ]
     );
 }
@@ -690,8 +694,10 @@ fn custom_nested_chords_use_the_same_arbitration_for_host_actions() {
         assert_eq!(
             log.lock().unwrap().sent,
             [
+                ("left_ctrl".into(), KeyState::Up),
                 (expected.into(), KeyState::Down),
-                (expected.into(), KeyState::Up)
+                (expected.into(), KeyState::Up),
+                ("left_ctrl".into(), KeyState::Down)
             ]
         );
     }
@@ -716,16 +722,576 @@ fn a_single_nonmodifier_prefix_waits_for_completion_or_release() {
         assert!(log.lock().unwrap().sent.is_empty());
         assert_eq!(engine.input.pending_chords.len(), 1);
         if complete {
-            engine.handle_backend_event(key_down("c"), &mut backend).unwrap();
-            engine.handle_backend_event(key_up("c"), &mut backend).unwrap();
+            engine
+                .handle_backend_event(key_down("c"), &mut backend)
+                .unwrap();
+            engine
+                .handle_backend_event(key_up("c"), &mut backend)
+                .unwrap();
         }
-        engine.handle_backend_event(key_up("x"), &mut backend).unwrap();
+        engine
+            .handle_backend_event(key_up("x"), &mut backend)
+            .unwrap();
         let expected = if complete { "end" } else { "home" };
         assert_eq!(
             log.lock().unwrap().sent,
-            [(expected.into(), KeyState::Down), (expected.into(), KeyState::Up)]
+            [
+                (expected.into(), KeyState::Down),
+                (expected.into(), KeyState::Up)
+            ]
         );
     }
+}
+
+#[test]
+fn unbound_chord_prefixes_are_consumed_without_a_timer_or_leaked_character() {
+    for (prefix, partner) in [("c", "h"), ("x", "j"), ("f3", "f4")] {
+        let config = Config::parse(&format!(
+            "[normal.bindings]\n\"{prefix}+{partner}\" = \"arrow_left\""
+        ))
+        .unwrap();
+        for complete in [false, true] {
+            let mut engine = chord_test_engine(&config);
+            let (mut backend, log) = FakeBackend::new(enter_normal());
+            engine.run(&mut backend).unwrap();
+            let before = log.lock().unwrap().dispositions.len();
+            let timeout = engine.next_timeout();
+            engine
+                .handle_backend_event(key_down(prefix), &mut backend)
+                .unwrap();
+            assert_eq!(engine.next_timeout(), timeout);
+            assert_eq!(
+                log.lock().unwrap().dispositions[before],
+                KeyDisposition::Consume
+            );
+            assert!(log.lock().unwrap().sent.is_empty());
+            if complete {
+                engine
+                    .handle_backend_event(key_down(partner), &mut backend)
+                    .unwrap();
+                engine
+                    .handle_backend_event(key_up(partner), &mut backend)
+                    .unwrap();
+            }
+            engine
+                .handle_backend_event(key_up(prefix), &mut backend)
+                .unwrap();
+            let expected = if complete { "arrow_left" } else { prefix };
+            assert_eq!(
+                log.lock().unwrap().sent,
+                [
+                    (expected.into(), KeyState::Down),
+                    (expected.into(), KeyState::Up),
+                ]
+            );
+            assert!(engine.input.pending_chords.is_empty());
+        }
+    }
+}
+
+#[test]
+fn keyboard_chord_mappings_repeat_with_native_events_and_stop_without_prefix() {
+    for (key, output) in [
+        ("h", "arrow_left"),
+        ("j", "arrow_down"),
+        ("k", "arrow_up"),
+        ("l", "arrow_right"),
+    ] {
+        // An identical bare-key mapping must not take over an existing chord's
+        // repeat stream after the prefix is released.
+        let config = Config::parse(&format!(
+            "[normal.bindings]\n\"c+{key}\" = \"{output}\"\n{key} = \"{output}\""
+        ))
+        .unwrap();
+        let mut engine = chord_test_engine(&config);
+        let (mut backend, log) = FakeBackend::new(enter_normal());
+        engine.run(&mut backend).unwrap();
+        let timeout = engine.next_timeout();
+        engine
+            .handle_backend_event(key_down("c"), &mut backend)
+            .unwrap();
+        engine
+            .handle_backend_event(key_down(key), &mut backend)
+            .unwrap();
+        let mut repeat = key_down(key);
+        if let BackendEvent::Input(input) = &mut repeat {
+            input.repeat = true;
+        }
+        for _ in 0..3 {
+            engine
+                .handle_backend_event(repeat.clone(), &mut backend)
+                .unwrap();
+        }
+        assert_eq!(engine.next_timeout(), timeout);
+        let expected: Vec<_> = (0..4)
+            .flat_map(|_| {
+                [
+                    (output.into(), KeyState::Down),
+                    (output.into(), KeyState::Up),
+                ]
+            })
+            .collect();
+        assert_eq!(log.lock().unwrap().sent, expected);
+        engine
+            .handle_backend_event(key_up("c"), &mut backend)
+            .unwrap();
+        engine.handle_backend_event(repeat, &mut backend).unwrap();
+        engine
+            .handle_backend_event(key_up(key), &mut backend)
+            .unwrap();
+        assert_eq!(log.lock().unwrap().sent, expected);
+        assert!(engine.input.active_gestures.is_empty());
+        assert!(engine.input.pending_chords.is_empty());
+        assert!(engine.input.latched.is_empty());
+    }
+}
+
+#[test]
+fn direct_keyboard_mappings_repeat_and_release_without_an_extra_tap() {
+    for (source, output, prefix) in [
+        ("x", "backspace", None),
+        ("ctrl+x", "shift+arrow_left", Some("left_ctrl")),
+    ] {
+        let config = Config::parse(&format!(
+            "[normal.bindings]\n\"{source}\" = \"send {output}\""
+        ))
+        .unwrap();
+        let mut engine = chord_test_engine(&config);
+        let (mut backend, log) = FakeBackend::new(enter_normal());
+        engine.run(&mut backend).unwrap();
+        if let Some(prefix) = prefix {
+            engine
+                .handle_backend_event(key_down(prefix), &mut backend)
+                .unwrap();
+        }
+        engine
+            .handle_backend_event(key_down("x"), &mut backend)
+            .unwrap();
+        let mut repeat = key_down("x");
+        if let BackendEvent::Input(input) = &mut repeat {
+            input.repeat = true;
+        }
+        engine
+            .handle_backend_event(repeat.clone(), &mut backend)
+            .unwrap();
+        let sends = log.lock().unwrap().sent.clone();
+        assert_eq!(sends.len(), if prefix.is_some() { 12 } else { 4 });
+        engine
+            .handle_backend_event(key_up("x"), &mut backend)
+            .unwrap();
+        // Stray repeat after release cannot start a new gesture.
+        engine.handle_backend_event(repeat, &mut backend).unwrap();
+        assert_eq!(log.lock().unwrap().sent, sends);
+    }
+}
+
+#[test]
+fn mapped_chords_suspend_arbitrary_source_modifiers_on_every_repeat() {
+    for side in ["left", "right"] {
+        for mask in 1..16 {
+            let modifiers: Vec<_> = ["ctrl", "alt", "shift", "win"]
+                .into_iter()
+                .enumerate()
+                .filter(|(bit, _)| mask & (1 << bit) != 0)
+                .map(|(_, name)| format!("{side}_{name}"))
+                .collect();
+            let source = format!("{}+j", modifiers.join("+"));
+            let config =
+                Config::parse(&format!("[normal.bindings]\n\"{source}\" = \"arrow_down\""))
+                    .unwrap();
+            let mut engine = chord_test_engine(&config);
+            let (mut backend, log) = FakeBackend::new(enter_normal());
+            engine.run(&mut backend).unwrap();
+            for key in &modifiers {
+                engine
+                    .handle_backend_event(key_down(key), &mut backend)
+                    .unwrap();
+            }
+            let timeout = engine.next_timeout();
+            for repeat in [false, true, true] {
+                let mut event = key_down("j");
+                if let BackendEvent::Input(input) = &mut event {
+                    input.repeat = repeat;
+                }
+                engine.handle_backend_event(event, &mut backend).unwrap();
+            }
+            let cycle: Vec<_> = modifiers
+                .iter()
+                .rev()
+                .map(|key| (key.clone(), KeyState::Up))
+                .chain([
+                    ("arrow_down".into(), KeyState::Down),
+                    ("arrow_down".into(), KeyState::Up),
+                ])
+                .chain(modifiers.iter().map(|key| (key.clone(), KeyState::Down)))
+                .collect();
+            let expected: Vec<_> = cycle
+                .iter()
+                .cloned()
+                .cycle()
+                .take(cycle.len() * 3)
+                .collect();
+            assert_eq!(log.lock().unwrap().sent, expected, "{source}");
+            assert_eq!(engine.next_timeout(), timeout);
+            engine
+                .handle_backend_event(key_up("j"), &mut backend)
+                .unwrap();
+            for key in modifiers.iter().rev() {
+                engine
+                    .handle_backend_event(key_up(key), &mut backend)
+                    .unwrap();
+            }
+            assert_eq!(log.lock().unwrap().sent, expected, "{source}");
+        }
+    }
+}
+
+#[test]
+fn mapped_chords_preserve_explicit_target_modifiers_already_held() {
+    let config = Config::parse("[normal.bindings]\n\"ctrl+alt+j\" = \"ctrl+arrow_down\"").unwrap();
+    let mut engine = chord_test_engine(&config);
+    let (mut backend, log) = FakeBackend::new(enter_normal());
+    engine.run(&mut backend).unwrap();
+    for key in ["right_ctrl", "left_alt", "j"] {
+        engine
+            .handle_backend_event(key_down(key), &mut backend)
+            .unwrap();
+    }
+    assert_eq!(
+        log.lock().unwrap().sent,
+        [
+            ("left_alt".into(), KeyState::Up),
+            ("arrow_down".into(), KeyState::Down),
+            ("arrow_down".into(), KeyState::Up),
+            ("left_alt".into(), KeyState::Down),
+        ]
+    );
+}
+
+#[test]
+fn literal_character_keyboard_mapping_keeps_character_priority_on_repeat() {
+    let config = Config::parse("[normal.bindings]\n\"?\" = \"arrow_left\"").unwrap();
+    let mut engine = chord_test_engine(&config);
+    let (mut backend, log) = FakeBackend::new(enter_normal());
+    engine.run(&mut backend).unwrap();
+    let mut input = key_down("/");
+    if let BackendEvent::Input(event) = &mut input {
+        event.character = Some('?');
+    }
+    engine
+        .handle_backend_event(input.clone(), &mut backend)
+        .unwrap();
+    if let BackendEvent::Input(event) = &mut input {
+        event.repeat = true;
+    }
+    engine.handle_backend_event(input, &mut backend).unwrap();
+    engine
+        .handle_backend_event(key_up("/"), &mut backend)
+        .unwrap();
+    assert_eq!(
+        log.lock().unwrap().sent,
+        [
+            ("arrow_left".into(), KeyState::Down),
+            ("arrow_left".into(), KeyState::Up),
+            ("arrow_left".into(), KeyState::Down),
+            ("arrow_left".into(), KeyState::Up),
+        ]
+    );
+}
+
+#[test]
+fn interrupted_unbound_prefix_preserves_typing_order_and_key_edges() {
+    let config = Config::parse("[normal.bindings]\n\"c+h\" = \"arrow_left\"").unwrap();
+    let mut engine = chord_test_engine(&config);
+    let (mut backend, log) = FakeBackend::new(enter_normal());
+    engine.run(&mut backend).unwrap();
+    engine
+        .handle_backend_event(key_down("c"), &mut backend)
+        .unwrap();
+    engine
+        .handle_backend_event(key_down("x"), &mut backend)
+        .unwrap();
+    assert_eq!(
+        log.lock().unwrap().sent,
+        [
+            ("c".into(), KeyState::Down),
+            ("c".into(), KeyState::Up),
+            ("x".into(), KeyState::Down),
+        ]
+    );
+    engine
+        .handle_backend_event(key_up("c"), &mut backend)
+        .unwrap();
+    engine
+        .handle_backend_event(key_up("x"), &mut backend)
+        .unwrap();
+    assert_eq!(
+        log.lock().unwrap().sent.last(),
+        Some(&("x".into(), KeyState::Up))
+    );
+    assert!(engine.input.latched.is_empty());
+    let before = log.lock().unwrap().dispositions.len();
+    engine
+        .handle_backend_event(key_down("z"), &mut backend)
+        .unwrap();
+    assert_eq!(
+        log.lock().unwrap().dispositions[before],
+        KeyDisposition::Forward
+    );
+}
+
+#[test]
+fn unbound_prefix_index_respects_active_routes_and_modifiers() {
+    for binding in ["c+h", "ctrl+c+h"] {
+        let config = Config::parse(&format!(
+            "[normal.bindings]\n\"{binding}\" = \"arrow_left\""
+        ))
+        .unwrap();
+        for normal in [false, true] {
+            let mut engine = chord_test_engine(&config);
+            let (mut backend, log) = FakeBackend::new(if normal { enter_normal() } else { vec![] });
+            engine.run(&mut backend).unwrap();
+            engine
+                .handle_backend_event(key_down("c"), &mut backend)
+                .unwrap();
+            let expected = if normal && binding == "c+h" {
+                KeyDisposition::Consume
+            } else {
+                KeyDisposition::Forward
+            };
+            assert_eq!(log.lock().unwrap().dispositions.last(), Some(&expected));
+        }
+    }
+}
+
+#[test]
+fn disabled_continuations_and_raw_mode_letters_do_not_arm_unbound_prefixes() {
+    for raw_mode in [false, true] {
+        let config = Config::parse(if raw_mode {
+            "[normal.bindings]\ng = \"grid\"\n\"c+h\" = \"arrow_left\""
+        } else {
+            "[normal.bindings]\n\"c+h\" = \"none\""
+        })
+        .unwrap();
+        let mut engine = chord_test_engine(&config);
+        let (mut backend, log) = FakeBackend::new(enter_normal());
+        engine.run(&mut backend).unwrap();
+        if raw_mode {
+            engine
+                .handle_backend_event(key_down("g"), &mut backend)
+                .unwrap();
+            engine
+                .handle_backend_event(key_up("g"), &mut backend)
+                .unwrap();
+        }
+        engine
+            .handle_backend_event(key_down("c"), &mut backend)
+            .unwrap();
+        assert!(engine.input.pending_chords.is_empty());
+        assert!(log.lock().unwrap().sent.is_empty());
+        if !raw_mode {
+            assert_eq!(
+                log.lock().unwrap().dispositions.last(),
+                Some(&KeyDisposition::Forward)
+            );
+        }
+    }
+}
+
+#[test]
+fn multi_key_unbound_prefixes_cancel_together_on_completion() {
+    let config = Config::parse("[normal.bindings]\n\"c+x+h\" = \"arrow_left\"").unwrap();
+    let mut engine = chord_test_engine(&config);
+    let (mut backend, log) = FakeBackend::new(enter_normal());
+    engine.run(&mut backend).unwrap();
+    for key in ["c", "x"] {
+        engine
+            .handle_backend_event(key_down(key), &mut backend)
+            .unwrap();
+    }
+    assert_eq!(engine.input.pending_chords.len(), 2);
+    assert!(log.lock().unwrap().sent.is_empty());
+    engine
+        .handle_backend_event(key_down("h"), &mut backend)
+        .unwrap();
+    for key in ["h", "c", "x"] {
+        engine
+            .handle_backend_event(key_up(key), &mut backend)
+            .unwrap();
+    }
+    assert_eq!(log.lock().unwrap().sent.len(), 2);
+    assert!(engine.input.pending_chords.is_empty());
+}
+
+#[test]
+fn a_new_unbound_prefix_remains_armed_after_flushing_the_previous_one() {
+    let config =
+        Config::parse("[normal.bindings]\n\"c+h\" = \"arrow_left\"\n\"x+j\" = \"arrow_down\"")
+            .unwrap();
+    let mut engine = chord_test_engine(&config);
+    let (mut backend, log) = FakeBackend::new(enter_normal());
+    engine.run(&mut backend).unwrap();
+    for key in ["c", "x", "j"] {
+        engine
+            .handle_backend_event(key_down(key), &mut backend)
+            .unwrap();
+    }
+    for key in ["c", "x", "j"] {
+        engine
+            .handle_backend_event(key_up(key), &mut backend)
+            .unwrap();
+    }
+    assert_eq!(
+        log.lock().unwrap().sent,
+        [
+            ("c".into(), KeyState::Down),
+            ("c".into(), KeyState::Up),
+            ("arrow_down".into(), KeyState::Down),
+            ("arrow_down".into(), KeyState::Up),
+        ]
+    );
+}
+
+#[test]
+fn unbound_prefix_fallback_preserves_original_modifier_state() {
+    let config = Config::parse("[normal.bindings]\n\"ctrl+c+h\" = \"arrow_left\"").unwrap();
+    for modifier_first in [false, true] {
+        let mut engine = chord_test_engine(&config);
+        let (mut backend, log) = FakeBackend::new(enter_normal());
+        engine.run(&mut backend).unwrap();
+        for key in ["left_ctrl", "c"] {
+            engine
+                .handle_backend_event(key_down(key), &mut backend)
+                .unwrap();
+        }
+        assert!(log.lock().unwrap().sent.is_empty());
+        for key in if modifier_first {
+            ["left_ctrl", "c"]
+        } else {
+            ["c", "left_ctrl"]
+        } {
+            engine
+                .handle_backend_event(key_up(key), &mut backend)
+                .unwrap();
+        }
+        let expected = if modifier_first {
+            vec![
+                ("left_ctrl".into(), KeyState::Down),
+                ("c".into(), KeyState::Down),
+                ("c".into(), KeyState::Up),
+                ("left_ctrl".into(), KeyState::Up),
+            ]
+        } else {
+            vec![("c".into(), KeyState::Down), ("c".into(), KeyState::Up)]
+        };
+        assert_eq!(log.lock().unwrap().sent, expected);
+    }
+}
+
+#[test]
+fn replayed_key_repeats_and_capture_loss_release_native_ownership() {
+    let config = Config::parse("[normal.bindings]\n\"c+h\" = \"arrow_left\"").unwrap();
+    let mut engine = chord_test_engine(&config);
+    let (mut backend, log) = FakeBackend::new(enter_normal());
+    engine.run(&mut backend).unwrap();
+    for key in ["c", "x"] {
+        engine
+            .handle_backend_event(key_down(key), &mut backend)
+            .unwrap();
+    }
+    let mut repeat = key_down("x");
+    if let BackendEvent::Input(input) = &mut repeat {
+        input.repeat = true;
+    }
+    engine.handle_backend_event(repeat, &mut backend).unwrap();
+    engine
+        .handle_backend_event(BackendEvent::InputCaptureLost("test".into()), &mut backend)
+        .unwrap();
+    assert_eq!(
+        log.lock().unwrap().sent,
+        [
+            ("c".into(), KeyState::Down),
+            ("c".into(), KeyState::Up),
+            ("x".into(), KeyState::Down),
+            ("x".into(), KeyState::Down),
+            ("x".into(), KeyState::Up),
+        ]
+    );
+    assert!(engine.input.latched.is_empty());
+    assert!(engine.input.pending_chords.is_empty());
+}
+
+#[test]
+fn replayed_physical_key_does_not_become_or_release_a_user_toggle() {
+    let config =
+        Config::parse("[normal.bindings]\n\"c+h\" = \"arrow_left\"\nn = \"toggle x\"").unwrap();
+    let mut engine = chord_test_engine(&config);
+    let (mut backend, log) = FakeBackend::new(enter_normal());
+    engine.run(&mut backend).unwrap();
+    for key in ["c", "x"] {
+        engine
+            .handle_backend_event(key_down(key), &mut backend)
+            .unwrap();
+    }
+    assert!(engine.input.latched.is_empty());
+    engine
+        .handle_backend_event(key_down("n"), &mut backend)
+        .unwrap();
+    engine
+        .handle_backend_event(key_up("x"), &mut backend)
+        .unwrap();
+    assert!(!engine.input.latched.is_empty());
+    assert!(
+        !log.lock()
+            .unwrap()
+            .sent
+            .contains(&("x".into(), KeyState::Up))
+    );
+    engine
+        .handle_backend_event(key_up("n"), &mut backend)
+        .unwrap();
+    engine
+        .handle_backend_event(key_down("n"), &mut backend)
+        .unwrap();
+    assert!(engine.input.latched.is_empty());
+    assert_eq!(
+        log.lock().unwrap().sent.last(),
+        Some(&("x".into(), KeyState::Up))
+    );
+}
+
+#[test]
+#[ignore = "allocation probe; run alone with --test-threads=1"]
+fn unavailable_unbound_prefixes_do_not_allocate_or_delay_ordinary_keys() {
+    let config = Config::parse("[normal.bindings]\n\"ctrl+c+h\" = \"arrow_left\"").unwrap();
+    let mut engine = chord_test_engine(&config);
+    engine.rebuild_tables();
+    engine.set_active(ModeId::normal());
+    for name in ["c", "z"] {
+        let key = Key::new(name).unwrap();
+        engine.input.pressed.clear();
+        engine.input.pressed.insert(key.clone());
+        let region = Region::new(TEST_ALLOCATOR);
+        for _ in 0..10_000 {
+            assert!(!engine.defer_unbound_prefix(&key));
+        }
+        assert_eq!(region.change().allocations, 0);
+    }
+    let key = Key::new("c").unwrap();
+    let modifier = Key::new("left_ctrl").unwrap();
+    engine.input.pressed.clear();
+    engine.input.pressed.insert(key.clone());
+    engine.input.pressed.insert(modifier.clone());
+    engine
+        .input
+        .key_dispositions
+        .insert(modifier, KeyDisposition::Forward);
+    let region = Region::new(TEST_ALLOCATOR);
+    for _ in 0..10_000 {
+        assert!(engine.defer_unbound_prefix(&key));
+        engine.input.pending_chords.clear();
+    }
+    assert_eq!(region.change().allocations, 0);
 }
 
 #[test]
