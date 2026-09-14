@@ -59,6 +59,27 @@ impl Borrow<str> for Key {
 }
 
 impl Key {
+    /// Canonical injection aliases, shared across sends and prewarmed by Engine.
+    pub(crate) fn injection_modifiers() -> &'static [Self; 4] {
+        static KEYS: OnceLock<[Key; 4]> = OnceLock::new();
+        KEYS.get_or_init(|| {
+            ["left_shift", "left_ctrl", "left_alt", "left_win"].map(|name| Key(name.into()))
+        })
+    }
+
+    /// Resolve a generic modifier to its default output side. Explicit sides
+    /// and non-modifier keys are already concrete and are borrowed unchanged.
+    pub(crate) fn injection_key(&self) -> &Self {
+        let index = match self.as_str() {
+            "shift" => 0,
+            "ctrl" => 1,
+            "alt" => 2,
+            "win" => 3,
+            _ => return self,
+        };
+        &Self::injection_modifiers()[index]
+    }
+
     /// Extra mouse buttons enter the ordinary binding pipeline as physical
     /// keys. Cache canonical names so native edges only clone an Arc.
     pub(crate) fn mouse_side_button(number: u8) -> Option<Self> {
@@ -291,13 +312,15 @@ impl<'de> Deserialize<'de> for Key {
 /// A set of keys that must be held simultaneously, e.g. `left_alt+g`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct KeyChord {
+    // Original keys followed by concrete injection keys only when they differ.
     keys: Vec<Key>,
-    activation: Key,
+    input_len: usize,
+    activation: usize,
 }
 
 impl KeyChord {
     pub fn parse(value: &str) -> Result<Self, String> {
-        let keys = if value.trim().chars().count() == 1 {
+        let mut keys = if value.trim().chars().count() == 1 {
             vec![Key::new(value)?]
         } else {
             value
@@ -316,12 +339,21 @@ impl KeyChord {
         }
         let activation = keys
             .iter()
-            .rev()
-            .find(|key| !key.is_modifier())
-            .or_else(|| keys.last())
-            .cloned()
-            .ok_or_else(|| "chord must contain a key".to_string())?;
-        Ok(Self { keys, activation })
+            .rposition(|key| !key.is_modifier())
+            .unwrap_or(keys.len() - 1);
+        let input_len = keys.len();
+        if keys.iter().any(|key| key != key.injection_key()) {
+            keys.reserve(input_len);
+            for index in 0..input_len {
+                let concrete = keys[index].injection_key().clone();
+                keys.push(concrete);
+            }
+        }
+        Ok(Self {
+            keys,
+            input_len,
+            activation,
+        })
     }
 
     pub(crate) fn parse_with_aliases(
@@ -332,12 +364,22 @@ impl KeyChord {
     }
 
     pub fn keys(&self) -> &[Key] {
-        &self.keys
+        &self.keys[..self.input_len]
+    }
+
+    /// Concrete output keys compiled at parse time; input matching keeps the
+    /// original side-agnostic modifiers returned by `keys()`.
+    pub(crate) fn injection_keys(&self) -> &[Key] {
+        if self.keys.len() == self.input_len {
+            self.keys()
+        } else {
+            &self.keys[self.input_len..]
+        }
     }
 
     /// The non-modifier key whose press completes the chord.
     pub fn activation_key(&self) -> &Key {
-        &self.activation
+        &self.keys[self.activation]
     }
 
     /// Whether `key` is the physical key that completes this chord. Generic
@@ -364,11 +406,11 @@ impl KeyChord {
         }
 
         let (mut modifiers, mut keys): (Vec<_>, Vec<_>) =
-            self.keys.iter().partition(|key| key.is_modifier());
+            self.keys().iter().partition(|key| key.is_modifier());
         modifiers.sort_by(|a, b| modifier_rank(a).cmp(&modifier_rank(b)).then(a.cmp(b)));
         // Preserve the completion key across canonicalize -> parse. Sorting
         // every letter would turn `alt+s+a` into a chord completed by S.
-        keys.sort_by_key(|key| (*key == &self.activation, *key));
+        keys.sort_by_key(|key| (*key == self.activation_key(), *key));
         modifiers
             .into_iter()
             .chain(keys)
@@ -380,9 +422,34 @@ impl KeyChord {
     /// True when every key of the chord is currently held. Side-agnostic
     /// modifiers (`alt`) match either physical side.
     pub fn matches_pressed(&self, pressed: &[Key]) -> bool {
-        self.keys
+        self.keys()
             .iter()
             .all(|key| modifier_equivalent_is_pressed(key, pressed))
+    }
+}
+
+#[cfg(test)]
+mod injection_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_injection_preserves_generic_input_matching_and_round_trip() {
+        let chord = KeyChord::parse("ctrl+alt+shift+win+j").unwrap();
+        assert_eq!(
+            chord
+                .injection_keys()
+                .iter()
+                .map(Key::as_str)
+                .collect::<Vec<_>>(),
+            ["left_ctrl", "left_alt", "left_shift", "left_win", "j"]
+        );
+        let right = ["right_ctrl", "right_alt", "right_shift", "right_win", "j"]
+            .map(|name| Key::new(name).unwrap());
+        assert!(chord.matches_pressed(&right));
+        assert_eq!(chord.canonical(), "ctrl+alt+shift+win+j");
+        assert_eq!(chord.activation_key().as_str(), "j");
+        let concrete = KeyChord::parse("right_ctrl+j").unwrap();
+        assert!(std::ptr::eq(concrete.keys(), concrete.injection_keys()));
     }
 }
 

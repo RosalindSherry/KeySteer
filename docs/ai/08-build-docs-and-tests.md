@@ -1,5 +1,17 @@
 # 构建、打包、文档站与测试
 
+映射发送性能探针 `mapped_chord_preparation_performance` 用 release 模式单线程 ignored 测试
+测量 Engine 准备阶段（不注入系统输入），覆盖无修饰键、Alt、目标 Ctrl+Shift 和多源修饰键。
+也覆盖目标 Ctrl 已由右 Ctrl 按住时的动态筛选。每组预热后循环 200,000 次并检查零分配；
+测试使用计数系统分配器，输出为每批 1,000 次的平均耗时分位数，
+不是端到端按键延迟。`mapped_chord_native_preparation_does_not_allocate` 检查常见 Windows
+原生批次准备无分配。超出内联容量的任意长配置仍允许堆回退。
+
+2026-09-14 本机局部对照（上述计数分配器、release）：预编译前 Alt → Ctrl+Shift+方向键
+每次准备 12 次分配，批均值中位数约 573–575ns；预编译后为 0 次、约 42ns。
+无源修饰键、Alt 和四个源修饰键的纯方向目标分别约 18/33/68ns；这些数值仅用于局部回归，
+不包含 Hook、原生队列、SendInput 或目标应用处理，不能作为端到端延迟承诺。
+
 键盘映射原生重复回归：`keyboard_chord_mappings_repeat_with_native_events_and_stop_without_prefix`
 覆盖 C+H/J/K/L 连续输入、同输出裸键不接管与无新增 deadline；
 `direct_keyboard_mappings_repeat_and_release_without_an_extra_tap` 覆盖单键、带修饰键发送和释放后停止。

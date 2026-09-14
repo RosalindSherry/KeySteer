@@ -6,6 +6,51 @@ fn chord_test_engine(config: &Config) -> Engine {
     .unwrap()
 }
 
+#[test]
+#[ignore = "allocation and preparation benchmark; run alone with --test-threads=1"]
+fn mapped_chord_preparation_performance() {
+    use std::hint::black_box;
+    let mut engine = chord_test_engine(&Config::default());
+    for (source, target) in [
+        ("", "arrow_down"),
+        ("left_alt", "arrow_down"),
+        ("left_alt", "ctrl+shift+arrow_down"),
+        ("right_ctrl", "ctrl+arrow_down"),
+        ("left_alt+right_ctrl+left_shift+right_win", "arrow_down"),
+    ] {
+        engine.input.pressed.clear();
+        engine.input.key_dispositions.clear();
+        for name in source.split('+').filter(|name| !name.is_empty()) {
+            let key = Key::new(name).unwrap();
+            engine.input.pressed.insert(key.clone());
+            engine
+                .input
+                .key_dispositions
+                .insert(key, KeyDisposition::Forward);
+        }
+        let chord = KeyChord::parse(target).unwrap();
+        for _ in 0..1000 {
+            black_box(engine.prepare_mapped_chord(black_box(&chord)));
+        }
+        let mut samples = Vec::with_capacity(200);
+        let region = Region::new(TEST_ALLOCATOR);
+        for _ in 0..200 {
+            let start = Instant::now();
+            for _ in 0..1000 {
+                black_box(engine.prepare_mapped_chord(black_box(&chord)));
+            }
+            samples.push(start.elapsed().as_nanos() / 1000);
+        }
+        let allocations = region.change().allocations;
+        assert_eq!(allocations, 0, "source={source:?} target={target}");
+        samples.sort_unstable();
+        println!(
+            "mapped_prepare source={source:?} target={target} p50={}ns p99={}ns allocations={allocations}",
+            samples[100], samples[198]
+        );
+    }
+}
+
 fn display_primary() -> String {
     KeyChord::parse(&normal_launcher()).unwrap().keys()[0]
         .as_str()

@@ -3,6 +3,20 @@
 use super::input_router::CompiledKeymap;
 use super::*;
 
+pub(super) enum MappedChordKeys<'a> {
+    Compiled(&'a [Key]),
+    Filtered(SmallVec<[Key; 8]>),
+}
+
+impl MappedChordKeys<'_> {
+    fn as_slice(&self) -> &[Key] {
+        match self {
+            Self::Compiled(keys) => keys,
+            Self::Filtered(keys) => keys,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct PendingLongPressToggle {
     pub(super) fires_at: Instant,
@@ -1546,9 +1560,31 @@ impl Engine {
         chord: &KeyChord,
         backend: &mut dyn Backend,
     ) -> Result<(), String> {
+        let (keys, suspended) = self.prepare_mapped_chord(chord);
+        let result = if suspended.is_empty() {
+            backend.send_chord(keys.as_slice())
+        } else {
+            backend.send_chord_suspending(keys.as_slice(), &suspended)
+        };
+        if let Err(error) = result {
+            // A batch failure may mean that Windows accepted only a prefix.
+            // Record every member conservatively; redundant key-up events are
+            // harmless and safer than leaving a modifier held.
+            self.input
+                .latched
+                .extend(keys.as_slice().iter().cloned().map(InputTarget::Key));
+            return Err(self.recoverable_input_error("keyboard chord", error));
+        }
+        Ok(())
+    }
+
+    pub(super) fn prepare_mapped_chord<'a>(
+        &self,
+        chord: &'a KeyChord,
+    ) -> (MappedChordKeys<'a>, SmallVec<[Key; 8]>) {
         // Only native-visible physical modifiers can leak into the target.
         // Explicit press/toggle latches intentionally remain active.
-        let physical_modifiers: SmallVec<[Key; 8]> = self
+        let physical_modifiers: SmallVec<[&Key; 8]> = self
             .input
             .pressed
             .iter()
@@ -1557,10 +1593,10 @@ impl Engine {
                     && (self.input.key_dispositions.get(key) == Some(&KeyDisposition::Forward)
                         || self.input.replayed_keys.contains(key))
             })
-            .cloned()
             .collect();
         let suspended: SmallVec<[Key; 8]> = physical_modifiers
             .iter()
+            .copied()
             .filter(|key| {
                 !self.latched_key_matches(key)
                     && !chord
@@ -1572,33 +1608,28 @@ impl Engine {
             .collect();
         // Do not emit an Up for a target modifier already held physically or
         // by press/toggle; it is already part of the application's key state.
-        let keys: SmallVec<[Key; 8]> = chord
-            .keys()
-            .iter()
-            .filter(|key| {
-                !self.latched_key_matches(key)
-                    && !(key.is_modifier()
-                        && physical_modifiers
-                            .iter()
-                            .any(|held| Self::keys_match(key, held)))
-            })
-            .map(Self::injected_key)
-            .collect();
-        let result = if suspended.is_empty() {
-            backend.send_chord(&keys)
-        } else {
-            backend.send_chord_suspending(&keys, &suspended)
+        let omit = |key: &Key| {
+            self.latched_key_matches(key)
+                || (key.is_modifier()
+                    && physical_modifiers
+                        .iter()
+                        .any(|held| Self::keys_match(key, held)))
         };
-        if let Err(error) = result {
-            // A batch failure may mean that Windows accepted only a prefix.
-            // Record every member conservatively; redundant key-up events are
-            // harmless and safer than leaving a modifier held.
-            self.input
-                .latched
-                .extend(keys.into_iter().map(InputTarget::Key));
-            return Err(self.recoverable_input_error("keyboard chord", error));
-        }
-        Ok(())
+        let keys = if let Some(first) = chord.keys().iter().position(omit) {
+            let mut filtered = SmallVec::new();
+            filtered.extend(chord.injection_keys()[..first].iter().cloned());
+            filtered.extend(
+                chord.keys()[first + 1..]
+                    .iter()
+                    .zip(&chord.injection_keys()[first + 1..])
+                    .filter(|(key, _)| !omit(key))
+                    .map(|(_, concrete)| concrete.clone()),
+            );
+            MappedChordKeys::Filtered(filtered)
+        } else {
+            MappedChordKeys::Compiled(chord.injection_keys())
+        };
+        (keys, suspended)
     }
 }
 
@@ -2014,14 +2045,7 @@ impl Engine {
     }
 
     pub(super) fn injected_key(key: &Key) -> Key {
-        let concrete = match key.as_str() {
-            "shift" => "left_shift",
-            "ctrl" => "left_ctrl",
-            "alt" => "left_alt",
-            "win" => "left_win",
-            _ => return key.clone(),
-        };
-        Key::new(concrete).unwrap_or_else(|_| key.clone())
+        key.injection_key().clone()
     }
 
     pub(super) fn modifier_family(key: &Key) -> Option<&'static str> {

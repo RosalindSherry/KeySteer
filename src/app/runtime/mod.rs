@@ -160,6 +160,8 @@ impl Engine {
         appearance: Appearance,
         register_catalog: bool,
     ) -> Result<Self, String> {
+        // Resolve canonical injection aliases before any physical input arrives.
+        let _ = Key::injection_modifiers();
         let RuntimePlan {
             settings,
             palettes,

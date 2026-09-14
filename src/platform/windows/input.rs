@@ -1123,6 +1123,20 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "allocation probe; run alone with --test-threads=1"]
+    fn mapped_chord_native_preparation_does_not_allocate() {
+        let keys = [0xA2, 0xA0, 0x28];
+        let modifiers = [0xA4, 0x5C];
+        let region = stats_alloc::Region::new(crate::TEST_ALLOCATOR);
+        for _ in 0..10_000 {
+            let live = live_modifiers(black_box(&modifiers), [u64::MAX; 4]);
+            black_box(mapped_chord_inputs(black_box(&keys), &live));
+        }
+        assert_eq!(region.change().allocations, 0);
+        assert_eq!(region.change().deallocations, 0);
+    }
+
+    #[test]
     fn mapped_chord_does_not_restore_released_source_modifiers() {
         let mut physical = [0u64; 4];
         physical[0xA3 / 64] |= 1 << (0xA3 % 64);
