@@ -313,6 +313,7 @@ impl QuickSwitchStyles {
         key.border_color = Color::rgb(196, 201, 211);
         key.border_width = 1.0;
         key.border_radius = 3.0;
+        key.padding_x = key.font_size * 0.12;
         key.padding_y = 1.0;
         caption.bold = false;
         Self {

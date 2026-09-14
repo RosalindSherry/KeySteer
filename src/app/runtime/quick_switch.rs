@@ -20,7 +20,7 @@ pub(super) struct Pending {
     candidates: Vec<ModeId>,
     window: Option<Rect>,
     rows: Vec<crate::api::overlay::OverlayText>,
-    text_width: f64,
+    text_metrics: crate::presentation::quick_switch::CaptionMetrics,
 }
 
 impl Engine {
@@ -122,7 +122,7 @@ impl Engine {
                 candidates: Vec::new(),
                 window: None,
                 rows: Vec::new(),
-                text_width: 0.0,
+                text_metrics: Default::default(),
             });
             return Ok(true);
         }
@@ -230,13 +230,7 @@ impl Engine {
             .iter()
             .map(|mode| crate::api::overlay::OverlayText::from(mode.as_str()))
             .collect::<Vec<_>>();
-        pending.text_width = rows
-            .iter()
-            .map(|row| crate::presentation::quick_switch::caption_width(row.as_str()))
-            .reduce(f64::max)
-            .unwrap_or_else(|| {
-                crate::presentation::quick_switch::caption_width("No available modes")
-            });
+        pending.text_metrics = crate::presentation::quick_switch::CaptionMetrics::for_rows(&rows);
         pending.rows = rows;
         if !show {
             return Ok(());
@@ -298,7 +292,7 @@ impl Engine {
         };
         crate::presentation::quick_switch::Panel {
             rows: &pending.rows,
-            text_width: pending.text_width,
+            text_metrics: pending.text_metrics,
             styles: style,
             position: self.settings.quick_switch.position,
             screen: screen.bounds,

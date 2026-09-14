@@ -7,10 +7,12 @@ use crate::api::{OverlayScene, Point, Rect};
 pub(crate) fn caption_width(text: &str) -> f64 {
     text.chars()
         .map(|ch| match ch {
-            'i' | 'l' | 'I' => 0.28,
-            'r' | 't' | 'f' | ' ' => 0.38,
-            'm' | 'w' | 'M' | 'W' => 0.9,
+            'i' | 'l' | 'I' => 0.25,
+            'r' | 't' | 'f' | ' ' => 0.35,
+            'm' | 'w' => 0.8,
+            'M' | 'W' => 0.9,
             '_' => 0.5,
+            ch if ch.is_ascii_lowercase() => 0.56,
             ch if ch.is_ascii() => 0.6,
             _ => 1.0,
         })
@@ -18,9 +20,49 @@ pub(crate) fn caption_width(text: &str) -> f64 {
         + 0.15
 }
 
+/// Font-relative estimates computed once when the candidate list changes.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct CaptionMetrics {
+    max_width: f64,
+    mean_width: f64,
+}
+
+impl CaptionMetrics {
+    pub(crate) fn for_rows(rows: &[OverlayText]) -> Self {
+        if rows.is_empty() {
+            let width = caption_width("No available modes");
+            return Self {
+                max_width: width,
+                mean_width: width,
+            };
+        }
+        let mut max_width: f64 = 0.0;
+        let mut sum = 0.0;
+        for row in rows {
+            let width = caption_width(row);
+            max_width = max_width.max(width);
+            sum += width;
+        }
+        Self {
+            max_width,
+            mean_width: sum / rows.len() as f64,
+        }
+    }
+
+    fn gutters(self, font_size: f64, padding: f64) -> (f64, f64) {
+        let gutter = padding + font_size * 0.35;
+        // Left-aligned short rows place the average row midpoint left of the
+        // longest row's midpoint. Correct a quarter of that difference, keeping
+        // at least three quarters of the right gutter to avoid overcorrection.
+        let shift =
+            ((self.max_width - self.mean_width).max(0.0) * font_size / 8.0).min(gutter * 0.25);
+        (gutter + shift, gutter - shift)
+    }
+}
+
 pub(crate) struct Panel<'a> {
     pub rows: &'a [OverlayText],
-    pub text_width: f64,
+    pub text_metrics: CaptionMetrics,
     pub styles: &'a QuickSwitchStyles,
     pub position: QuickSwitchPosition,
     pub screen: Rect,
@@ -32,13 +74,19 @@ impl Panel<'_> {
     pub(crate) fn append_to(&self, scene: &mut OverlayScene) {
         let bounds = self.screen;
         let style = &self.styles.panel;
-        let scale = self.scale.max(1.0);
-        let key_width = style.font_size * 0.85 * scale;
+        // AppKit uses logical points; Retina scale only affects rasterization.
+        // Only Windows needs DPI-scaled geometry and compact-label compensation.
+        let scale = super::label_scale(self.scale);
+        // Use the same compact-label estimate as fit_panel_label so horizontal
+        // keycap padding survives layout instead of being clipped by its cell.
+        let key_width =
+            (self.styles.key.font_size * 0.75 + self.styles.key.padding_x * 2.0) * scale;
         let gap = style.font_size * 0.3 * scale;
-        let left_padding = (style.padding_x + style.font_size * 0.55) * scale;
-        let right_padding = style.padding_x * 0.5 * scale;
+        let (left_padding, right_padding) =
+            self.text_metrics.gutters(style.font_size, style.padding_x);
+        let (left_padding, right_padding) = (left_padding * scale, right_padding * scale);
         let row_height = style.font_size * 1.8 * scale;
-        let width = ((self.text_width * style.font_size * scale)
+        let width = ((self.text_metrics.max_width * style.font_size * scale)
             + left_padding
             + right_padding
             + key_width
@@ -152,6 +200,97 @@ mod tests {
         assert!(caption_width("iiii") < caption_width("wwww"));
     }
     #[test]
+    fn optical_gutters_follow_row_lengths_without_squeezing_longest_caption() {
+        for names in [
+            vec!["window_restore"],
+            vec!["window", "window"],
+            vec!["grid", "ui_hint", "window_restore"],
+            vec!["i", "i", "i", "i", "a_very_long_custom_mode_name"],
+            vec![],
+        ] {
+            let rows: Vec<OverlayText> = names.into_iter().map(Into::into).collect();
+            let metrics = CaptionMetrics::for_rows(&rows);
+            let (left, right) = metrics.gutters(28.0, 10.0);
+            // Rebalance existing whitespace without enlarging the panel or
+            // reducing the longest caption's allocated width.
+            assert!((left + right - 39.6).abs() < 0.01);
+            assert!(right >= 14.85 - 0.01);
+            let original_bias = (metrics.max_width - metrics.mean_width) * 28.0 / 2.0;
+            let corrected_bias = original_bias - (left - right) / 2.0;
+            if original_bias > 0.01 {
+                assert!(corrected_bias >= 0.0 && corrected_bias < original_bias);
+                assert!(left > right);
+            } else {
+                assert_eq!(left, right);
+            }
+        }
+    }
+    #[test]
+    fn retina_panel_uses_platform_coordinates_and_balanced_gutters() {
+        let rows: Vec<OverlayText> = [
+            "grid",
+            "window",
+            "ui_hint",
+            "recursive_grid",
+            "window_quick",
+            "window_editor",
+            "window_restore",
+            "window_tab",
+        ]
+        .into_iter()
+        .map(Into::into)
+        .collect();
+        let styles = QuickSwitchStyles::new(crate::api::overlay::LabelStyle {
+            font_size: 28.0,
+            padding_x: 10.0,
+            padding_y: 6.0,
+            ..Default::default()
+        });
+        let mut scene = OverlayScene::default();
+        Panel {
+            rows: &rows,
+            text_metrics: CaptionMetrics::for_rows(&rows),
+            styles: &styles,
+            position: QuickSwitchPosition::Screen,
+            screen: Rect::new(0.0, 0.0, 1440.0, 900.0),
+            scale: 2.0,
+            window: None,
+            cursor: Point::default(),
+        }
+        .append_to(&mut scene);
+        // Retina backing pixels must not double the 415.2-point AppKit panel.
+        let expected_scale = if cfg!(target_os = "windows") {
+            2.0
+        } else {
+            1.0
+        };
+        let panel = scene.labels[0].rect;
+        assert!((panel.height - (8.0 * 28.0 * 1.8 + 12.0) * expected_scale).abs() < 0.01);
+        let rendered = |label: &OverlayLabel| {
+            if cfg!(target_os = "windows") {
+                crate::api::overlay::scaled_label_geometry(
+                    &label.text,
+                    label.rect,
+                    &label.style,
+                    expected_scale,
+                )
+                .0
+            } else {
+                label.rect
+            }
+        };
+        let key = rendered(&scene.labels[1]);
+        let longest = rendered(&scene.labels[14]);
+        assert!(key.left() - panel.left() > panel.right() - longest.right());
+        assert!(panel.right() - longest.right() >= 9.0 * expected_scale);
+        let caption_left = rendered(&scene.labels[2]).left();
+        for row in scene.labels[1..].chunks_exact(2) {
+            let caption = rendered(&row[1]);
+            assert!((caption.left() - caption_left).abs() < 1.0);
+            assert!(caption.bottom() <= panel.bottom());
+        }
+    }
+    #[test]
     fn dpi_scaled_rows_keep_the_same_font_and_do_not_overlap() {
         let rows = vec![
             "normal".into(),
@@ -167,7 +306,7 @@ mod tests {
             let mut scene = OverlayScene::default();
             Panel {
                 rows: &rows,
-                text_width: caption_width("window_restore"),
+                text_metrics: CaptionMetrics::for_rows(&rows),
                 styles: &styles,
                 position: QuickSwitchPosition::Screen,
                 screen: Rect::new(0.0, 0.0, 1920.0, 1080.0),
@@ -176,6 +315,7 @@ mod tests {
                 cursor: Point::new(0.0, 0.0),
             }
             .append_to(&mut scene);
+            let scale = super::super::label_scale(scale);
             let mut bottom = 0.0;
             let mut left = None;
             for row in scene.labels[1..].chunks_exact(2) {
@@ -194,6 +334,7 @@ mod tests {
                 assert_eq!(key_scale, scale);
                 assert_eq!(caption_scale, scale);
                 assert!(key.right() <= caption.left());
+                assert!(key.width >= (row[0].style.font_size * 0.99 * scale).floor());
                 assert!(key.top().min(caption.top()) >= bottom);
                 assert_eq!(*left.get_or_insert(caption.left()), caption.left());
                 assert!(caption.right() <= scene.labels[0].rect.right());
@@ -208,7 +349,7 @@ mod tests {
         let styles = QuickSwitchStyles::new(crate::api::overlay::LabelStyle::default());
         let mut panel = Panel {
             rows: &rows,
-            text_width: caption_width("window"),
+            text_metrics: CaptionMetrics::for_rows(&rows),
             styles: &styles,
             position: QuickSwitchPosition::Screen,
             scale: 1.0,

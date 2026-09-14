@@ -2,7 +2,7 @@
 
 窗口身份卡片的引导线由共享 `window.card.guide_line_enabled/width/color` 控制；颜色在 WindowStyles 中按主题预编译。背景标签携带可选 LabelConnectorStyle，统一避让创建连接线时也遵循开关和样式；关闭线条不影响避让。未设置连接样式的其他标注保留原行为。
 
-快速切换面板按当前屏幕比例统一计算行距和列宽，标签矩形补偿原生 compact-label 的居中缩放，防止逐行独立放大造成重叠。数字沿用 Key Help 的灰色键帽，名称保持透明无边框；Windows DPI 缩放保留零宽边框，不将其强制变为一像素。
+快速切换面板通过 `presentation::label_scale` 使用平台布局比例：Windows 按当前屏幕 DPI 统一计算行距和列宽，并补偿原生 compact-label 的居中缩放；macOS 始终使用逻辑点，Retina backing scale 仅用于原生栅格化，不能用于面板尺寸或名称偏移。名称按比例字体估算宽度；打开时缓存最长和平均宽度，最长名称决定列宽，二者差值的八分之一用于将右侧留白转移到左侧，补偿较短行造成的视觉偏左。右侧至少保留原留白的四分之三，等长行不偏移，名称列始终左对齐；不在鼠标移动时重新扫描名称。数字沿用 Key Help 的灰色键帽，左右各保留字号 12% 的内边距，键帽列宽包含该内边距；名称保持透明无边框；Windows DPI 缩放保留零宽边框，不将其强制变为一像素。
 
 快速切换面板由 `presentation/quick_switch.rs` 构建，使用配置编译好的浅深主题 SharedLabelStyle。数字使用独立按键框，名称列左对齐；默认字号 28、左右内边距各 10。面板／按键／名称三份样式在配置加载时编译，排名和各行文本只在打开时生成；鼠标移动时复用文本／样式，原生渲染器继续复用窗口和缓冲。仅长按候选复用现有 scheduler deadline，模式计数写入没有周期 timer，也不会进入窗口几何跟随路径。
 
@@ -255,7 +255,7 @@ macOS 原生探针使用固定 AppKit fixture 子进程，运行：
 
 - API v8 uses inline UTF-8 `OverlayText` and COW `SharedLabelStyle` for labels.
   Unregistered labels keep their wire representation; registered annotations add optional placement metadata. On supported 64-bit targets their layout
-  gates are 24 bytes, 8 bytes, and at most 88 bytes for `OverlayLabel` (including eight bytes of optional annotation metadata).
+  gates are 24 bytes, 8 bytes, and at most 104 bytes for `OverlayLabel` (including eight bytes of optional annotation grouping and 16 bytes of optional guide-line style). Both optional metadata layouts have separate size assertions; guide-line style stays inline without a per-label heap allocation.
 - Hint resolves one shared label style per scene. Windows DPI scaling interns
   scaled styles by source identity and scale instead of detaching every label.
 - Scene sorting first performs an O(n) ordered check and only runs the stable

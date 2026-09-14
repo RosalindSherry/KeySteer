@@ -1,5 +1,10 @@
 # Release notes
 
+## 0.10.7
+
+- Fixed oversized quick-switch panels and misaligned mode names on macOS Retina displays.
+- Refined quick-switch panel width and balanced side padding based on mode-name lengths for better visual centering while keeping names left-aligned.
+
 ## 0.10.6
 
 - Added quick switching by mode usage: hold `Q` in an operating mode and press a number to switch, with usage statistics, a blacklist, and configurable panel styling.

@@ -1,5 +1,13 @@
 # 更新日志 / Release Notes
 
+## 0.10.7
+
+- 修复 macOS Retina 屏幕上快速切换面板过大、模式名称对齐错位的问题。
+- 调整快速切换面板宽度，并根据名称长度分布平衡左右留白，保持名称左对齐，让内容在视觉上更居中。
+
+- Fixed oversized quick-switch panels and misaligned mode names on macOS Retina displays.
+- Refined quick-switch panel width and balanced side padding based on mode-name lengths for better visual centering while keeping names left-aligned.
+
 ## 0.10.6
 
 - 新增常用模式快速切换：操作模式中长按 `Q` 查看面板，按数字切换；支持使用统计、黑名单及面板样式配置。

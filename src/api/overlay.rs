@@ -906,8 +906,15 @@ mod tests {
     fn compact_overlay_layout_stays_within_budget() {
         assert_eq!(std::mem::size_of::<OverlayText>(), 24);
         assert_eq!(std::mem::size_of::<SharedLabelStyle>(), 8);
-        // Includes eight bytes of optional annotation grouping metadata.
-        assert!(std::mem::size_of::<OverlayLabel>() <= 88);
+        assert_eq!(std::mem::size_of::<Option<LabelPlacement>>(), 8);
+        assert_eq!(std::mem::size_of::<Option<LabelConnectorStyle>>(), 16);
+        // The original 88-byte budget includes annotation grouping. Configurable
+        // guide lines add 16 inline bytes, without a per-label heap allocation.
+        let label_size = std::mem::size_of::<OverlayLabel>();
+        assert!(
+            label_size <= 104,
+            "OverlayLabel is {label_size} bytes (budget: 104)"
+        );
         println!(
             "overlay_label_size_candidate={} label_style_size_candidate={}",
             std::mem::size_of::<OverlayLabel>(),
