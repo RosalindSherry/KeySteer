@@ -443,7 +443,6 @@ pub struct LabelPlacement {
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct LabelConnectorStyle {
-    pub enabled: bool,
     pub width: f64,
     pub color: Color,
 }
@@ -462,10 +461,6 @@ pub struct OverlayLabel {
     pub z_index: i32,
     /// When false the backend centers text in `rect` without growing it.
     pub fit_to_text: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub placement: Option<LabelPlacement>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub connector: Option<LabelConnectorStyle>,
 }
 
 impl OverlayLabel {
@@ -481,8 +476,6 @@ impl OverlayLabel {
             matched_prefix_len: 0,
             z_index: 0,
             fit_to_text: false,
-            placement: None,
-            connector: None,
         }
     }
 
@@ -505,15 +498,44 @@ impl OverlayLabel {
         self
     }
 
-    pub fn with_placement(mut self, group: u32, role: LabelPlacementRole) -> Self {
-        self.placement = Some(LabelPlacement { group, role });
-        self
+    pub fn with_placement(self, group: u32, role: LabelPlacementRole) -> SceneLabel {
+        SceneLabel {
+            label: self,
+            placement: Some(LabelPlacement { group, role }),
+        }
     }
 
     pub fn fitted(mut self) -> Self {
         self.fit_to_text = true;
         self
     }
+}
+
+/// Transient builder; window-only data is stored separately when inserted.
+pub struct SceneLabel {
+    label: OverlayLabel,
+    placement: Option<LabelPlacement>,
+}
+impl From<OverlayLabel> for SceneLabel {
+    fn from(label: OverlayLabel) -> Self {
+        Self {
+            label,
+            placement: None,
+        }
+    }
+}
+impl SceneLabel {
+    pub fn with_z_index(mut self, z: i32) -> Self {
+        self.label.z_index = z;
+        self
+    }
+}
+
+/// Sparse, scene-owned window annotations. Plain Hint/Grid labels carry none.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct WindowAnnotations {
+    placements: Vec<(usize, LabelPlacement)>,
+    guide_line: Option<LabelConnectorStyle>,
 }
 
 /// Resolve the geometry Windows uses when rasterising a label at monitor DPI.
@@ -785,12 +807,36 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for OverlayItems<T> {
     }
 }
 
+fn serialize_annotations<S: Serializer>(
+    value: &Option<Arc<WindowAnnotations>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    value.as_deref().serialize(serializer)
+}
+fn deserialize_annotations<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Arc<WindowAnnotations>>, D::Error> {
+    Option::<WindowAnnotations>::deserialize(deserializer).map(|data| {
+        data.map(|mut data| {
+            data.placements.sort_unstable_by_key(|(index, _)| *index);
+            Arc::new(data)
+        })
+    })
+}
+
 /// One complete frame for the backend to present.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct OverlayScene {
     /// Shapes are drawn beneath labels of equal z-index.
     pub shapes: OverlayItems<OverlayShape>,
     pub labels: OverlayItems<OverlayLabel>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "serialize_annotations",
+        deserialize_with = "deserialize_annotations"
+    )]
+    pub window_annotations: Option<Arc<WindowAnnotations>>,
     pub cursor_marker: Option<CursorMarker>,
     pub indicator: Option<Indicator>,
     /// Dim the whole desktop before drawing, e.g. for grid modes.
@@ -810,7 +856,11 @@ impl OverlayScene {
         Self {
             shapes: OverlayItems::with_capacity(shapes),
             labels: OverlayItems::with_capacity(labels),
-            ..Self::default()
+            window_annotations: None,
+            cursor_marker: None,
+            indicator: None,
+            backdrop: None,
+            clip: None,
         }
     }
 
@@ -819,9 +869,62 @@ impl OverlayScene {
         self
     }
 
-    pub fn push_label(&mut self, label: OverlayLabel) -> &mut Self {
-        self.labels.push(label);
+    pub fn push_label(&mut self, label: impl Into<SceneLabel>) -> &mut Self {
+        let label = label.into();
+        if let Some(placement) = label.placement {
+            self.set_label_placement(self.labels.len(), placement);
+        }
+        self.labels.push(label.label);
         self
+    }
+
+    pub fn label_placement(&self, index: usize) -> Option<LabelPlacement> {
+        let placements = &self.window_annotations.as_ref()?.placements;
+        placements
+            .binary_search_by_key(&index, |(index, _)| *index)
+            .ok()
+            .map(|i| placements[i].1)
+    }
+
+    pub fn set_label_placement(&mut self, index: usize, placement: LabelPlacement) {
+        let data = Arc::make_mut(
+            self.window_annotations
+                .get_or_insert_with(|| Arc::new(WindowAnnotations::default())),
+        );
+        match data
+            .placements
+            .binary_search_by_key(&index, |(index, _)| *index)
+        {
+            Ok(i) => data.placements[i].1 = placement,
+            Err(i) => data.placements.insert(i, (index, placement)),
+        }
+    }
+
+    /// Set once for a window scene; every identity card shares this style.
+    pub fn set_connector_style(&mut self, style: LabelConnectorStyle) {
+        Arc::make_mut(
+            self.window_annotations
+                .get_or_insert_with(|| Arc::new(WindowAnnotations::default())),
+        )
+        .guide_line = Some(style);
+    }
+
+    pub fn connector_style(&self) -> Option<LabelConnectorStyle> {
+        self.window_annotations.as_ref()?.guide_line
+    }
+
+    /// Append labels from another screen, preserving annotation identities.
+    pub fn extend_labels(&mut self, other: &Self) {
+        let offset = self.labels.len();
+        self.labels.extend(other.labels.iter().cloned());
+        if let Some(data) = &other.window_annotations {
+            for (index, placement) in &data.placements {
+                self.set_label_placement(offset + index, *placement);
+            }
+            if let Some(style) = data.guide_line {
+                self.set_connector_style(style);
+            }
+        }
     }
 
     pub fn push_shape(&mut self, shape: OverlayShape) -> &mut Self {
@@ -855,6 +958,26 @@ impl OverlayScene {
             .windows(2)
             .all(|pair| pair[0].z_index <= pair[1].z_index)
         {
+            if let Some(data) = &mut self.window_annotations {
+                // Only Window scenes need an index permutation. Plain-label sorting
+                // and pointer-only updates keep their original allocation behavior.
+                let mut order: Vec<_> = (0..self.labels.len()).collect();
+                order.sort_unstable_by_key(|i| (self.labels[*i].z_index, *i));
+                let mut destinations = vec![0; order.len()];
+                for (new, old) in order.into_iter().enumerate() {
+                    destinations[old] = new;
+                }
+                let data = Arc::make_mut(data);
+                data.placements.retain_mut(|(index, _)| {
+                    if let Some(destination) = destinations.get(*index) {
+                        *index = *destination;
+                        true
+                    } else {
+                        false
+                    }
+                });
+                data.placements.sort_unstable_by_key(|(index, _)| *index);
+            }
             self.labels.sort_by_key(|label| label.z_index);
         }
     }
@@ -863,6 +986,64 @@ impl OverlayScene {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn window_annotations_are_sparse_shared_and_follow_sorted_merged_labels() {
+        let mut plain = OverlayScene::with_capacity(0, 1);
+        plain.push_label(OverlayLabel::new(
+            "hint",
+            Rect::default(),
+            LabelStyle::default(),
+        ));
+        let guide = LabelConnectorStyle {
+            width: 2.0,
+            color: Color::rgb(1, 2, 3),
+        };
+        assert!(plain.window_annotations.is_none());
+        let mut window = OverlayScene::new();
+        window.push_label(
+            OverlayLabel::new("card", Rect::default(), LabelStyle::default())
+                .with_z_index(20)
+                .with_placement(1, LabelPlacementRole::Background),
+        );
+        window.push_label(
+            OverlayLabel::new("number", Rect::default(), LabelStyle::default())
+                .with_z_index(-1)
+                .with_placement(1, LabelPlacementRole::Fixed),
+        );
+        assert!(window.connector_style().is_none());
+        window.set_connector_style(guide);
+        let original = window.clone();
+        assert!(Arc::ptr_eq(
+            window.window_annotations.as_ref().unwrap(),
+            original.window_annotations.as_ref().unwrap()
+        ));
+        plain.extend_labels(&window);
+        plain.sort_in_place();
+        assert_eq!(plain.labels[0].text, "number");
+        assert_eq!(
+            plain.label_placement(0).unwrap().role,
+            LabelPlacementRole::Fixed
+        );
+        assert_eq!(plain.labels[1].text, "hint");
+        assert_eq!(plain.label_placement(1), None);
+        assert_eq!(plain.labels[2].text, "card");
+        assert_eq!(
+            plain.label_placement(2).unwrap().role,
+            LabelPlacementRole::Background
+        );
+        assert_eq!(plain.connector_style(), window.connector_style());
+        window.sort_in_place();
+        assert_eq!(original.labels[0].text, "card");
+        assert_eq!(
+            original.label_placement(0).unwrap().role,
+            LabelPlacementRole::Background
+        );
+        assert_eq!(window.labels[0].text, "number");
+        let decoded: OverlayScene =
+            serde_json::from_str(&serde_json::to_string(&plain).unwrap()).unwrap();
+        assert_eq!(decoded, plain);
+    }
 
     #[test]
     fn parses_only_canonical_rgba() {
@@ -906,14 +1087,10 @@ mod tests {
     fn compact_overlay_layout_stays_within_budget() {
         assert_eq!(std::mem::size_of::<OverlayText>(), 24);
         assert_eq!(std::mem::size_of::<SharedLabelStyle>(), 8);
-        assert_eq!(std::mem::size_of::<Option<LabelPlacement>>(), 8);
-        assert_eq!(std::mem::size_of::<Option<LabelConnectorStyle>>(), 16);
-        // The original 88-byte budget includes annotation grouping. Configurable
-        // guide lines add 16 inline bytes, without a per-label heap allocation.
         let label_size = std::mem::size_of::<OverlayLabel>();
         assert!(
-            label_size <= 104,
-            "OverlayLabel is {label_size} bytes (budget: 104)"
+            label_size <= 80,
+            "OverlayLabel is {label_size} bytes (budget: 80)"
         );
         println!(
             "overlay_label_size_candidate={} label_style_size_candidate={}",

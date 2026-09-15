@@ -129,15 +129,9 @@ fn warmed_compact_hint_assignment_reuses_two_thousand_labels() {
 fn owned_hint_delivery_stays_within_allocation_budget() {
     const TARGETS: usize = 2_000;
     const MAX_ALLOCATIONS: usize = 15;
-    // Fixed budgets, not size_of-based allowances that silently grow with types.
-    // Original owned-delivery budget: 840_920 - 2_000 * 104 = 632_920.
-    // OverlayLabel grew from 80 to 104 bytes for annotation placement (8) and
-    // connector style (16). One output array therefore needs 48_000 more bytes;
-    // the input UiTarget Vec is still adopted without a copy.
-    const MAX_LABEL_BYTES: usize = 104;
-    const MAX_OTHER_BYTES: usize = 472_920;
-    const MAX_BYTES: usize = MAX_OTHER_BYTES + TARGETS * MAX_LABEL_BYTES;
-    assert!(std::mem::size_of::<crate::api::OverlayLabel>() <= MAX_LABEL_BYTES);
+    // Window-specific annotations must not enlarge ordinary Hint labels.
+    const MAX_BYTES: usize = 632_920;
+    assert!(std::mem::size_of::<crate::api::OverlayLabel>() <= 80);
 
     let config = Config::default();
     let palette = config.palette(Appearance::Dark);
@@ -189,5 +183,9 @@ fn owned_hint_delivery_stays_within_allocation_budget() {
     assert!(
         change.bytes_allocated <= MAX_BYTES,
         "owned Hint delivery exceeded {MAX_BYTES} allocated bytes: {change:?}"
+    );
+    println!(
+        "owned Hint delivery: {} allocations, {} bytes (budget {MAX_BYTES})",
+        change.allocations, change.bytes_allocated
     );
 }

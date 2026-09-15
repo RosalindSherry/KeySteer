@@ -339,6 +339,7 @@ fn window_idle_inventory_and_number_input_do_not_allocate() {
             &w.card,
             &config.palette(Appearance::Light),
             &config.palette(Appearance::Dark),
+            crate::presentation::window::RENDERERS,
         )
         .into(),
     });

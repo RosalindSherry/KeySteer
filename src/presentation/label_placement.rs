@@ -214,15 +214,20 @@ struct Annotation {
     bounds: Rect,
     content_start: f64,
     minimum_width: f64,
+    connector_present: bool,
 }
 
-fn physical(label: &OverlayLabel, scale: f64) -> Rect {
-    if label.placement.is_some_and(|p| p.role == Role::Background) {
+fn physical(
+    label: &OverlayLabel,
+    placement: Option<crate::api::overlay::LabelPlacement>,
+    scale: f64,
+) -> Rect {
+    if placement.is_some_and(|p| p.role == Role::Background) {
         return label.rect;
     }
     // Fixed/flexible card parts already use a logical rectangle around the
     // physical center. Standalone tags follow the renderer's compact geometry.
-    if label.placement.is_some_and(|p| p.role == Role::Standalone) {
+    if placement.is_some_and(|p| p.role == Role::Standalone) {
         #[cfg(target_os = "windows")]
         return crate::api::overlay::scaled_label_geometry(
             &label.text,
@@ -244,8 +249,8 @@ fn physical(label: &OverlayLabel, scale: f64) -> Rect {
 
 fn annotations(scene: &OverlayScene, screen: &Screen, scale: f64) -> Vec<Annotation> {
     let mut members = BTreeMap::<u32, Vec<usize>>::new();
-    for (index, label) in scene.labels.iter().enumerate() {
-        if let Some(placement) = label.placement {
+    for index in 0..scene.labels.len() {
+        if let Some(placement) = scene.label_placement(index) {
             members.entry(placement.group).or_default().push(index);
         }
     }
@@ -253,11 +258,15 @@ fn annotations(scene: &OverlayScene, screen: &Screen, scale: f64) -> Vec<Annotat
         .into_iter()
         .filter_map(|(group, parts)| {
             let primary = *parts.iter().find(|index| {
-                scene.labels[**index]
-                    .placement
+                scene
+                    .label_placement(**index)
                     .is_some_and(|p| matches!(p.role, Role::Background | Role::Standalone))
             })?;
-            let bounds = physical(&scene.labels[primary], scale);
+            let bounds = physical(
+                &scene.labels[primary],
+                scene.label_placement(primary),
+                scale,
+            );
             if !screen.bounds.contains(&bounds.center()) {
                 return None;
             }
@@ -265,15 +274,17 @@ fn annotations(scene: &OverlayScene, screen: &Screen, scale: f64) -> Vec<Annotat
                 .iter()
                 .filter_map(|index| {
                     let label = &scene.labels[*index];
-                    (label.placement?.role == Role::Fixed)
-                        .then(|| physical(label, scale).right() - bounds.x + 9.0 * scale)
+                    (scene.label_placement(*index)?.role == Role::Fixed).then(|| {
+                        physical(label, scene.label_placement(*index), scale).right() - bounds.x
+                            + 9.0 * scale
+                    })
                 })
                 .fold(0.0, f64::max);
             let flexible_font = parts
                 .iter()
                 .filter_map(|index| {
                     let label = &scene.labels[*index];
-                    (label.placement?.role == Role::Flexible)
+                    (scene.label_placement(*index)?.role == Role::Flexible)
                         .then_some(label.style.font_size * scale)
                 })
                 .reduce(f64::max);
@@ -287,6 +298,7 @@ fn annotations(scene: &OverlayScene, screen: &Screen, scale: f64) -> Vec<Annotat
                 bounds,
                 content_start,
                 minimum_width,
+                connector_present: false,
             })
         })
         .collect()
@@ -373,11 +385,57 @@ fn packed(
     Some(positions)
 }
 
+// One scene-wide style, only for enabled window identity cards.
+fn update_connectors(
+    scene: &mut OverlayScene,
+    annotations: &mut [Annotation],
+    placements: &[Rect],
+    scale: f64,
+    connector: crate::api::overlay::LabelConnectorStyle,
+) {
+    // annotations are ordered by group by the BTreeMap in annotations().
+    // Visit existing lines once, then add only missing displaced-card lines.
+    for shape in &mut scene.shapes {
+        if let OverlayShape::Line {
+            to,
+            placement_group: Some(group),
+            ..
+        } = shape
+            && let Ok(index) = annotations.binary_search_by_key(group, |a| a.group)
+        {
+            *to = placements[index].center();
+            annotations[index].connector_present = true;
+        }
+    }
+    for (annotation, placed) in annotations.iter().zip(placements) {
+        if !scene
+            .label_placement(annotation.primary)
+            .is_some_and(|p| p.role == Role::Background)
+        {
+            continue;
+        }
+        let old = annotation.bounds;
+        let dx = placed.x - old.x;
+        let dy = placed.y - old.y;
+        if !annotation.connector_present
+            && (dx.abs() + dy.abs() > 1.0 || (old.width - placed.width).abs() > 1.0)
+        {
+            scene.push_shape(OverlayShape::label_connector(
+                old.center(),
+                placed.center(),
+                connector.color,
+                connector.width * scale,
+                annotation.group,
+            ));
+        }
+    }
+}
+
 /// Move each registered annotation as a unit, avoiding other annotations and
 /// fixed panels. Membership and connectors survive z sorting and new label types.
 pub(crate) fn avoid_overlaps(scene: &mut OverlayScene, screen: &Screen, panels: &[Rect]) {
     let scale = super::label_scale(screen.scale);
-    let annotations = annotations(scene, screen, scale);
+    let mut annotations = annotations(scene, screen, scale);
     if annotations.is_empty() {
         return;
     }
@@ -392,8 +450,8 @@ pub(crate) fn avoid_overlaps(scene: &mut OverlayScene, screen: &Screen, panels: 
     for annotation in &annotations {
         let old = annotation.bounds;
         let mut placed = card_position(old.center(), old.width, old.height, area, &occupied);
-        if scene.labels[annotation.primary]
-            .placement
+        if scene
+            .label_placement(annotation.primary)
             .is_some_and(|p| p.role == Role::Standalone)
         {
             placed.x = placed.x.round();
@@ -416,9 +474,13 @@ pub(crate) fn avoid_overlaps(scene: &mut OverlayScene, screen: &Screen, panels: 
             }
         }
     }
+    // Dispatch once per placement pass; no per-card enabled checks.
+    if let Some(style) = scene.connector_style() {
+        update_connectors(scene, &mut annotations, &placements, scale, style);
+    }
     for (annotation, mut placed) in annotations.into_iter().zip(placements) {
-        if scene.labels[annotation.primary]
-            .placement
+        if scene
+            .label_placement(annotation.primary)
             .is_some_and(|p| p.role == Role::Standalone)
         {
             placed.x = placed.x.round();
@@ -431,11 +493,12 @@ pub(crate) fn avoid_overlaps(scene: &mut OverlayScene, screen: &Screen, panels: 
             / (old.width - annotation.content_start - 9.0 * scale).max(1.0))
         .clamp(0.01, 1.0);
         for index in annotation.parts {
+            let placement = scene.label_placement(index);
             let label = &mut scene.labels[index];
-            match label.placement.map(|p| p.role) {
+            match placement.map(|p| p.role) {
                 Some(Role::Background) => label.rect = placed,
                 Some(Role::Flexible) if ratio < 1.0 => {
-                    let previous = physical(label, scale);
+                    let previous = physical(label, placement, scale);
                     let rect = Rect::new(
                         placed.x
                             + annotation.content_start
@@ -453,34 +516,6 @@ pub(crate) fn avoid_overlaps(scene: &mut OverlayScene, screen: &Screen, panels: 
                     label.rect.x += dx;
                     label.rect.y += dy;
                 }
-            }
-        }
-        if dx.abs() + dy.abs() > 1.0 || (old.width - placed.width).abs() > 1.0 {
-            let mut connected = false;
-            for shape in &mut scene.shapes {
-                if let OverlayShape::Line {
-                    to,
-                    placement_group: Some(group),
-                    ..
-                } = shape
-                    && *group == annotation.group
-                {
-                    *to = placed.center();
-                    connected = true;
-                }
-            }
-            let connector = scene.labels[annotation.primary].connector;
-            if !connected && connector.is_none_or(|style| style.enabled) {
-                scene.push_shape(OverlayShape::label_connector(
-                    old.center(),
-                    placed.center(),
-                    connector.map_or(
-                        scene.labels[annotation.primary].style.border_color,
-                        |style| style.color,
-                    ),
-                    connector.map_or(2.0, |style| style.width) * scale,
-                    annotation.group,
-                ));
             }
         }
     }
@@ -503,14 +538,15 @@ mod tests {
         for enabled in [true, false] {
             let mut scene = OverlayScene::new();
             let original = Rect::new(400.0, 300.0, 250.0, 60.0);
-            let mut label = OverlayLabel::new("", original, LabelStyle::default())
+            let label = OverlayLabel::new("", original, LabelStyle::default())
                 .with_placement(1, Role::Background);
             let color = crate::api::overlay::Color::rgb(255, 0, 0);
-            label.connector = Some(crate::api::overlay::LabelConnectorStyle {
-                enabled,
-                width: 5.0,
-                color,
-            });
+            if enabled {
+                scene.set_connector_style(crate::api::overlay::LabelConnectorStyle {
+                    width: 5.0,
+                    color,
+                });
+            }
             scene.push_label(label);
             avoid_overlaps(&mut scene, &screen, &[original]);
             assert_ne!(scene.labels[0].rect, original);
@@ -659,7 +695,10 @@ mod tests {
                         _ => None,
                     })
                     .collect();
-                assert_eq!(ends, [group.bounds.center()]);
+                assert!(
+                    ends.is_empty(),
+                    "annotations without an enabled guide style must not create lines"
+                );
             }
             scene.sort_in_place();
             let before = scene.clone();

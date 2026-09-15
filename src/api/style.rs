@@ -744,9 +744,22 @@ impl Default for KeyHelp {
     }
 }
 
+pub type WindowSceneRenderer = for<'a, 'b, 'c> fn(
+    &crate::api::presentation::WindowView<'a>,
+    &'b crate::api::HostContext<'c>,
+) -> crate::api::OverlayScene;
+
+/// Supplied by the host composer; the configuration compiler selects once.
+#[derive(Clone, Copy)]
+pub struct WindowSceneRenderers {
+    pub plain: WindowSceneRenderer,
+    pub with_guides: WindowSceneRenderer,
+}
+
 // Compiled once per configuration generation; scene construction only borrows these styles.
 #[derive(Debug)]
 pub struct WindowStyles {
+    pub render_scene: WindowSceneRenderer,
     pub card: WindowCardMetrics,
     pub position: [f64; 4],
     pub anchor: crate::api::Point,
@@ -766,7 +779,7 @@ pub struct WindowCardMetrics {
 
 #[derive(Debug)]
 pub struct ResolvedWindowStyle {
-    pub guide_line: crate::api::overlay::LabelConnectorStyle,
+    pub guide_line: Option<crate::api::overlay::LabelConnectorStyle>,
     pub base: SharedLabelStyle,
     pub number: SharedLabelStyle,
     pub background: SharedLabelStyle,
@@ -777,11 +790,22 @@ pub struct ResolvedWindowStyle {
 }
 
 impl WindowStyles {
-    pub fn new(ui: &LabelUi, card: &WindowCardUi, light: &Palette, dark: &Palette) -> Self {
+    pub fn new(
+        ui: &LabelUi,
+        card: &WindowCardUi,
+        light: &Palette,
+        dark: &Palette,
+        renderers: WindowSceneRenderers,
+    ) -> Self {
         let position = card
             .position_ratios()
             .unwrap_or_else(|error| panic!("window style requires validated position: {error}"));
         Self {
+            render_scene: if card.guide_line_enabled && card.guide_line_width > 0.0 {
+                renderers.with_guides
+            } else {
+                renderers.plain
+            },
             card: WindowCardMetrics {
                 position_mode: card.position_mode,
                 text_width: card.text_width,
@@ -816,7 +840,13 @@ mod window_styles_tests {
         let config = crate::config::Config::default();
         let light = config.palette(Appearance::Light);
         let dark = config.palette(Appearance::Dark);
-        let styles = WindowStyles::new(&config.window.ui, &config.window.card, &light, &dark);
+        let styles = WindowStyles::new(
+            &config.window.ui,
+            &config.window.card,
+            &light,
+            &dark,
+            crate::presentation::window::RENDERERS,
+        );
         let region = stats_alloc::Region::new(crate::TEST_ALLOCATOR);
         for i in 0..1000 {
             let resolved = styles.for_appearance(if i % 2 == 0 {
@@ -870,7 +900,13 @@ mod window_styles_tests {
         let config = crate::config::Config::default();
         let light = config.palette(Appearance::Light);
         let dark = config.palette(Appearance::Dark);
-        let styles = WindowStyles::new(&config.window.ui, &config.window.card, &light, &dark);
+        let styles = WindowStyles::new(
+            &config.window.ui,
+            &config.window.card,
+            &light,
+            &dark,
+            crate::presentation::window::RENDERERS,
+        );
         for (appearance, palette) in [(Appearance::Light, &light), (Appearance::Dark, &dark)] {
             let first = styles.for_appearance(appearance);
             let again = styles.for_appearance(appearance);
@@ -879,7 +915,13 @@ mod window_styles_tests {
         }
         let mut changed = config.window.card.clone();
         changed.app_font_size = 35.0;
-        let replacement = WindowStyles::new(&config.window.ui, &changed, &light, &dark);
+        let replacement = WindowStyles::new(
+            &config.window.ui,
+            &changed,
+            &light,
+            &dark,
+            crate::presentation::window::RENDERERS,
+        );
         assert_eq!(
             replacement.for_appearance(Appearance::Light).app.font_size,
             35.0
@@ -966,15 +1008,16 @@ impl ResolvedWindowStyle {
         }
         .into();
         Self {
-            guide_line: crate::api::overlay::LabelConnectorStyle {
-                enabled: card.guide_line_enabled && card.guide_line_width > 0.0,
-                width: card.guide_line_width,
-                color: resolve(
-                    card.guide_line_color.as_ref(),
-                    palette.appearance,
-                    style.border_color,
-                ),
-            },
+            guide_line: (card.guide_line_enabled && card.guide_line_width > 0.0).then(|| {
+                crate::api::overlay::LabelConnectorStyle {
+                    width: card.guide_line_width,
+                    color: resolve(
+                        card.guide_line_color.as_ref(),
+                        palette.appearance,
+                        style.border_color,
+                    ),
+                }
+            }),
             base,
             number: style,
             background,

@@ -389,4 +389,6 @@ API 默认 `send_chord_suspending` 自行汇总错误，恢复全部源修饰键
 
 Windows input 的 unsafe 文件预算为 9：新增的一处仅在 mapped-chord 测试中读取 `INPUT.Anonymous.ki`，读取前断言类型为 `INPUT_KEYBOARD`；生产 unsafe 数量不变；总预算对应从 368 增至 369，其他文件预算不变。
 
-2000 目标 owned Hint 交付预算仍为最多 15 次分配；字节预算为 472,920 字节的其他开销加 2000 × 104 字节的标签数组，共 680,920 字节。原 632,920 字节预算对应 80 字节标签；placement 和 connector 增加的 24 字节已由 overlay 结构大小测试独立限制。预算使用固定上限，不随实际结构大小自动增长；首批目标数组继续按所有权接管，禁止恢复深复制。全局分配统计需单独、单线程执行。
+2000 目标 owned Hint 交付恢复最多 15 次分配、632,920 字节的原预算，普通 OverlayLabel 大小上限恢复 80 字节。窗口 placement／connector 仅在 WindowAnnotations 稀疏表中存储，不扩大普通标签。`window_annotations_are_sparse_shared_and_follow_sorted_merged_labels` 验证无窗口数据时不创建表、未启用引导线不存储样式、clone 共享与写时隔离、排序重映射、多屏合并及序列化往返。引导线避让回归同时覆盖启用和禁用，无样式的标注不生成默认引导线。全局分配统计仍需单独、单线程执行。
+
+Window 卡片渲染回归额外从 TOML 分别编译 true／false／true，验证两主题的样式有无、实际场景共享样式和避让后的线条数量，覆盖开关重载。所有标注的默认避让依旧不隐式生成引导线。

@@ -293,3 +293,5 @@ WindowStyles 编译边界进一步收敛：不再保存原始 WindowCardUi，仅
 `"primary+j" = "arrow_down"` 输出不带物理 Primary 的方向键；目标写为 `ctrl+arrow_down`
 才保留 Ctrl。相同规则适用于任意修饰键组合与左右键，长按仍跟随系统重复。显式 press/toggle
 持有的修饰键保留其状态，未匹配的组合继续按原规则透传。
+
+`window.card.guide_line_enabled` 与零宽度在 WindowStyles 配置编译时选择宿主提供的 plain／with_guides 渲染入口。关闭时两套主题都不解析／保存引导线样式；运行时样式没有 enabled 字段。重载重新编译入口，Mode 不引用具体 presentation 实现。开启时每种主题只编译一份样式，整张场景共用，不按窗口复制样式条目。

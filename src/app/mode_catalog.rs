@@ -218,6 +218,7 @@ fn window_settings(config: &Config, kind: modes::window::WindowKind) -> modes::w
             &card,
             &config.palette(crate::api::Appearance::Light),
             &config.palette(crate::api::Appearance::Dark),
+            crate::presentation::window::RENDERERS,
         )
         .into(),
     }

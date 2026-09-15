@@ -1,12 +1,12 @@
 # 覆盖层、帧同步与性能约束
 
-窗口身份卡片的引导线由共享 `window.card.guide_line_enabled/width/color` 控制；颜色在 WindowStyles 中按主题预编译。背景标签携带可选 LabelConnectorStyle，统一避让创建连接线时也遵循开关和样式；关闭线条不影响避让。未设置连接样式的其他标注保留原行为。
+窗口身份卡片的引导线由共享 `window.card.guide_line_enabled/width/color` 控制；颜色在 WindowStyles 中按主题预编译。配置编译选择无引导线或有引导线的专用渲染入口；场景的可选 WindowAnnotations 表只保存一份启用时共享的 LabelConnectorStyle，关闭时不分配引导线条目；统一避让仅为显式启用的窗口卡片生成连接线，关闭线条不影响避让。普通 Hint/Grid 标签不携带窗口专用数据。
 
 快速切换面板通过 `presentation::label_scale` 使用平台布局比例：Windows 按当前屏幕 DPI 统一计算行距和列宽，并补偿原生 compact-label 的居中缩放；macOS 始终使用逻辑点，Retina backing scale 仅用于原生栅格化，不能用于面板尺寸或名称偏移。名称按比例字体估算宽度；打开时缓存最长和平均宽度，最长名称决定列宽，二者差值的八分之一用于将右侧留白转移到左侧，补偿较短行造成的视觉偏左。右侧至少保留原留白的四分之三，等长行不偏移，名称列始终左对齐；不在鼠标移动时重新扫描名称。数字沿用 Key Help 的灰色键帽，左右各保留字号 12% 的内边距，键帽列宽包含该内边距；名称保持透明无边框；Windows DPI 缩放保留零宽边框，不将其强制变为一像素。
 
 快速切换面板由 `presentation/quick_switch.rs` 构建，使用配置编译好的浅深主题 SharedLabelStyle。数字使用独立按键框，名称列左对齐；默认字号 28、左右内边距各 10。面板／按键／名称三份样式在配置加载时编译，排名和各行文本只在打开时生成；鼠标移动时复用文本／样式，原生渲染器继续复用窗口和缓冲。仅长按候选复用现有 scheduler deadline，模式计数写入没有周期 timer，也不会进入窗口几何跟随路径。
 
-Window 卡片、区域编号（`1、`2）和组编号（~1、~2）统一由 `presentation/label_placement.rs` 按屏幕避让。`OverlayLabel::placement` 显式记录组身份与 Background/Fixed/Flexible/Standalone 角色，引线也带同一组身份，不依赖 z_index 或数组相邻顺序。key_help 得到最终物理面板矩形后调用同一算法，完整移动背景、编号、应用名、标题及引线。先寻找最近空位，空间碎片不足时按可用空区重新排列；仅收窄 Flexible 标题并省略文字，固定编号与字号保持。实际 footprint 使用对应后端 DPI 几何。该工作仅发生在场景生成／帮助缓存失效时，不进入鼠标位置缓存命中路径。
+Window 卡片、区域编号（`1、`2）和组编号（~1、~2）统一由 `presentation/label_placement.rs` 按屏幕避让。`OverlayScene::window_annotations` 的稀疏表按标签索引显式记录组身份与 Background/Fixed/Flexible/Standalone 角色，引线也带同一组身份，不依赖 z_index 或数组相邻顺序。key_help 得到最终物理面板矩形后调用同一算法，完整移动背景、编号、应用名、标题及引线。先寻找最近空位，空间碎片不足时按可用空区重新排列；仅收窄 Flexible 标题并省略文字，固定编号与字号保持。实际 footprint 使用对应后端 DPI 几何。该工作仅发生在场景生成／帮助缓存失效时，不进入鼠标位置缓存命中路径。
 
 ## 统一场景构建
 
@@ -397,3 +397,7 @@ WindowView.configurable_position 仅对 Move／Editor 开启。EditorCard 仅保
 样式编译后仅保留 WindowCardMetrics 数值和共享绘制样式，不保留 WindowCardUi 字符串／颜色 DTO；中心比例提前派生。屏幕集中排列跳过逐窗口锚点 Vec 和区域查询，编号位数使用整数运算。动态窗口几何、屏幕 DPI、行列和碰撞仍在当前场景计算，避免静态缓存导致过期位置。测试验证 1000 次主题样式选择与共享引用克隆无堆分配。
 
 Window 退出的资源回收见 [原生后端](06-platform-backends.md#window-会话资源回收)。活动期间的 overlay、字体和几何快路径保持复用；无持久组的会话结束才释放窗口库存缓存。macOS 标签栏刷新和窗口 worker 批次使用各自的自动释放池，不能将临时 Cocoa 对象留到线程退出。系统显示的 footprint、驻留内存与分配器已释放的内存并不等价；实机比较需固定同一指标，观察重复进入／退出后是否持续增长。
+
+窗口标注与通用标签分离：`OverlayLabel` 保持最多 80 字节；WindowAnnotations 只在注册窗口标注时创建，placement 按标签索引保存，引导线仅在开启时按场景保存一份共享样式。场景 clone 共享 Arc，只有修改标注才写时复制；普通 Hint/Grid/指针场景无标注表分配。窗口场景排序同步重映射索引，多屏合并偏移索引，key_help 缓存同时保存源／结果标注表，不能将旧索引配给重新排序的标签。无标注场景保持原排序快路径。`with_capacity` 显式初始化字段，避免结构更新语法先构造随后丢弃默认 shapes/labels 的 Arc。
+
+引导线开关仅在配置编译读取，plain 入口使用零大小 NoGuides 策略，不执行逐卡片开关、距离判断和样式登记。启用入口共用一份主题样式。避让阶段按场景有无编译样式路由一次；没有样式时不进入引导线处理。启用后先单次遍历已有线条，用按组排序的标注表二分定位并更新端点，再仅为缺失且发生位移的窗口背景补线；取消逐窗口扫描全量 shapes 和逐组查找样式，不额外建立哈希表或临时连接数组。

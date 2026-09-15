@@ -16,10 +16,78 @@ fn app_name(window: &crate::api::window::WindowInfo) -> &str {
         .trim_end_matches(".exe")
 }
 
+pub(crate) const RENDERERS: crate::api::style::WindowSceneRenderers =
+    crate::api::style::WindowSceneRenderers {
+        plain: |view, ctx| view.scene_using(ctx, NoGuides),
+        with_guides: |view, ctx| {
+            let Some(style) = view
+                .styles
+                .for_appearance(ctx.palette.appearance)
+                .guide_line
+            else {
+                return view.scene_using(ctx, NoGuides);
+            };
+            view.scene_using(ctx, Guides(style))
+        },
+    };
+
+#[derive(Clone, Copy)]
+struct GuideGeometry {
+    source: Rect,
+    card: Rect,
+    height: f64,
+    scale: f64,
+    tree: bool,
+}
+trait CardGuides: Copy {
+    fn initialize(self, scene: &mut OverlayScene);
+    fn attach(self, scene: &mut OverlayScene, group: u32, geometry: GuideGeometry);
+}
+#[derive(Clone, Copy)]
+struct NoGuides;
+impl CardGuides for NoGuides {
+    #[inline(always)]
+    fn initialize(self, _: &mut OverlayScene) {}
+    #[inline(always)]
+    fn attach(self, _: &mut OverlayScene, _: u32, _: GuideGeometry) {}
+}
+#[derive(Clone, Copy)]
+struct Guides(crate::api::overlay::LabelConnectorStyle);
+impl CardGuides for Guides {
+    fn initialize(self, scene: &mut OverlayScene) {
+        scene.set_connector_style(self.0);
+    }
+    fn attach(self, scene: &mut OverlayScene, group: u32, geometry: GuideGeometry) {
+        let GuideGeometry {
+            source,
+            card,
+            height,
+            scale,
+            tree,
+        } = geometry;
+        if !tree
+            && ((card.center().x - source.center().x).abs() > 5.0
+                || (card.center().y - source.center().y).abs() > height * scale)
+        {
+            scene.push_shape(OverlayShape::label_connector(
+                source.center(),
+                card.center(),
+                self.0.color,
+                self.0.width * scale,
+                group,
+            ));
+        }
+    }
+}
+
 impl WindowView<'_> {
     pub(crate) fn scene(&self, ctx: &HostContext<'_>) -> OverlayScene {
+        (self.styles.render_scene)(self, ctx)
+    }
+
+    fn scene_using<G: CardGuides>(&self, ctx: &HostContext<'_>, guides: G) -> OverlayScene {
         let mut next_group = 0;
-        let mut scene = self.screen_scene(ctx, &mut next_group);
+        let mut scene = self.screen_scene(ctx, &mut next_group, guides);
         scene.clip = ctx.screens.get(self.screen).map(|s| s.bounds);
         if self.tree.is_none() {
             for screen in 0..ctx.screens.len() {
@@ -34,18 +102,23 @@ impl WindowView<'_> {
                         target: None,
                         ..*self
                     }
-                    .screen_scene(ctx, &mut next_group);
+                    .screen_scene(ctx, &mut next_group, guides);
                     scene.clip = Some(scene.clip.map_or(ctx.screens[screen].bounds, |clip| {
                         clip.union(&ctx.screens[screen].bounds)
                     }));
-                    scene.labels.extend(other.labels.iter().cloned());
+                    scene.extend_labels(&other);
                     scene.shapes.extend(other.shapes.iter().cloned());
                 }
             }
         }
         scene
     }
-    fn screen_scene(&self, ctx: &HostContext<'_>, next_group: &mut u32) -> OverlayScene {
+    fn screen_scene<G: CardGuides>(
+        &self,
+        ctx: &HostContext<'_>,
+        next_group: &mut u32,
+        guides: G,
+    ) -> OverlayScene {
         let mut scene = OverlayScene::new();
         let resolved = self.styles.for_appearance(ctx.palette.appearance);
         let card_config = &self.styles.card;
@@ -218,6 +291,7 @@ impl WindowView<'_> {
             }
         };
         let width = physical_width / scale;
+        guides.initialize(&mut scene);
         for ((window, footprint), lines) in windows.iter().zip(&positions).zip(&lines) {
             *next_group += 1;
             let group = *next_group;
@@ -231,27 +305,22 @@ impl WindowView<'_> {
                 (rows as f64 * row_height + card_config.padding_y * 2.0).max(height) * scale,
             );
 
-            if resolved.guide_line.enabled
-                && self.tree.is_none()
-                && ((card.center().x - window.bounds.center().x).abs() > 5.0
-                    || (card.center().y - window.bounds.center().y).abs() > height * scale)
-            {
-                scene.push_shape(OverlayShape::label_connector(
-                    window.bounds.center(),
-                    card.center(),
-                    resolved.guide_line.color,
-                    resolved.guide_line.width * scale,
-                    group,
-                ));
-            }
+            guides.attach(
+                &mut scene,
+                group,
+                GuideGeometry {
+                    source: window.bounds,
+                    card,
+                    height,
+                    scale,
+                    tree: self.tree.is_some(),
+                },
+            );
             scene.push_label(
                 OverlayLabel::new("", card, resolved.background.clone())
                     .with_z_index(19)
                     .with_placement(group, Role::Background),
             );
-            if let Some(background) = scene.labels.last_mut() {
-                background.connector = Some(resolved.guide_line);
-            }
             let number_rect = Rect::new(card.x, card.y, number_width * scale, card.height);
             scene.push_label(
                 OverlayLabel::new(text, logical(number_rect, scale), style.clone())
@@ -281,11 +350,14 @@ impl WindowView<'_> {
                 );
                 if let Some(label) = scene.labels.last_mut() {
                     label.z_index = 21;
-                    label.placement = Some(crate::api::overlay::LabelPlacement {
+                }
+                scene.set_label_placement(
+                    scene.labels.len() - 1,
+                    crate::api::overlay::LabelPlacement {
                         group,
                         role: Role::Flexible,
-                    });
-                }
+                    },
+                );
             }
         }
         for slot in slots {
@@ -404,6 +476,7 @@ border_color = "#FEDCBAFF"
                 &config.window.card,
                 &palette,
                 &config.palette(crate::api::Appearance::Dark),
+                crate::presentation::window::RENDERERS,
             ),
             border_width: 3.0,
             target: None,
@@ -414,7 +487,7 @@ border_color = "#FEDCBAFF"
             tree: None,
             gap: 0.0,
         };
-        let scene = view.screen_scene(&ctx, &mut 0);
+        let scene = view.scene(&ctx);
         let app = scene.labels.iter().find(|l| l.text == "Example").unwrap();
         let title = scene.labels.iter().find(|l| l.text == "Title").unwrap();
         let number = scene.labels.iter().find(|l| l.text == "1").unwrap();
@@ -425,7 +498,55 @@ border_color = "#FEDCBAFF"
         assert_eq!(title.style.text_color, Color::rgb(0x65, 0x43, 0x21));
         assert_eq!(number.style.text_color, Color::rgb(0x11, 0x22, 0x33));
         assert_eq!(number.style.border_color, Color::rgb(0xFE, 0xDC, 0xBA));
-        let repeated = view.screen_scene(&ctx, &mut 0);
+        // The actual TOML flag selects a specialized renderer once, including
+        // reload from enabled -> disabled -> enabled. Both themes agree.
+        for enabled in [true, false, true] {
+            let configured = crate::config::Config::parse(&format!(
+                "[window.card]\nguide_line_enabled = {enabled}\n"
+            ))
+            .unwrap();
+            let styles = crate::api::style::WindowStyles::new(
+                &configured.window.ui,
+                &configured.window.card,
+                &configured.palette(crate::api::Appearance::Light),
+                &configured.palette(crate::api::Appearance::Dark),
+                RENDERERS,
+            );
+            for appearance in [crate::api::Appearance::Light, crate::api::Appearance::Dark] {
+                assert_eq!(
+                    styles.for_appearance(appearance).guide_line.is_some(),
+                    enabled
+                );
+            }
+            let mut rendered = WindowView {
+                styles: &styles,
+                ..view
+            }
+            .scene(&ctx);
+            assert_eq!(rendered.connector_style().is_some(), enabled);
+            let card = rendered
+                .labels
+                .iter()
+                .find(|l| l.z_index == 19)
+                .unwrap()
+                .rect;
+            super::super::label_placement::avoid_overlaps(&mut rendered, &screens[0], &[card]);
+            let count = rendered
+                .shapes
+                .iter()
+                .filter(|shape| {
+                    matches!(
+                        shape,
+                        OverlayShape::Line {
+                            placement_group: Some(_),
+                            ..
+                        }
+                    )
+                })
+                .count();
+            assert_eq!(count, usize::from(enabled));
+        }
+        let repeated = view.scene(&ctx);
         for (first, second) in scene.labels.iter().zip(repeated.labels.iter()) {
             assert!(
                 first.style.ptr_eq(&second.style),

@@ -143,3 +143,7 @@ Window 的 S 切换同步鼠标下 Move/Resize，见 [API](02-runtime-and-api.md
 卡片数值化运行时数据、屏幕排列短路径和零分配样式复用见 [配置](03-configuration.md) 与 [性能](07-rendering-and-performance.md)。
 
 Window 退出后的跨平台库存回收、macOS 窗口 worker／标签栏局部自动释放池见 [后端](06-platform-backends.md)、[性能](07-rendering-and-performance.md) 与 [验证](08-build-docs-and-tests.md)。
+
+窗口专用标注从通用 OverlayLabel 移入可选场景表、禁用引导线无样式条目与 Hint 原分配预算恢复见 [性能](07-rendering-and-performance.md) 和 [验证](08-build-docs-and-tests.md)。
+
+引导线开关在配置编译选择专用渲染入口、开启时共享场景样式与单次扫描更新见 [配置](03-configuration.md)、[性能](07-rendering-and-performance.md) 和 [验证](08-build-docs-and-tests.md)。

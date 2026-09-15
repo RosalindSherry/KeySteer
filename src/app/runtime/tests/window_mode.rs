@@ -873,7 +873,7 @@ fn window_tree_labels_remain_large_and_avoid_window_cards() {
     assert!(area.rect.y > number.rect.bottom());
     assert!((area.rect.center().x - engine.screens[0].work_area.center().x).abs() < 1.0);
     assert!(engine.screens[0].work_area.contains(&area.rect.center()));
-    assert!(scene.labels.iter().filter(|label| label.placement.is_some_and(|p| p.role == crate::api::overlay::LabelPlacementRole::Background)).all(|card| card.rect.intersect(&area.rect).is_none()));
+    assert!(scene.labels.iter().enumerate().filter(|(index, _)| scene.label_placement(*index).is_some_and(|p| p.role == crate::api::overlay::LabelPlacementRole::Background)).all(|(_, card)| card.rect.intersect(&area.rect).is_none()));
     assert_eq!(area.style.font_size, 28.0);
 }
 
