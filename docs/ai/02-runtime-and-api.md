@@ -113,7 +113,9 @@ Engine 的 Frame、指针、按键等通用热路径直接调用借用式 `Mode:
 顺序逐事件发送。完整 chord 使用带默认实现的 `Backend::send_chord`；内置 Windows 后端把
 最多 8 个原生键码内联进异步队列，macOS 直接按切片注入，均不构造 down/up 临时 Vec。
 映射发送按目标 chord 决定修饰键：Engine 从原生可见的物理按键中收集目标不需要的修饰键，
-通过 `Backend::send_chord_suspending` 在发送期间释放并恢复。`KeyChord` 解析时生成具体注入序列，
+通过 `Backend::send_chord_suspending` 从目标事件中排除它们：Windows 批量释放并恢复，macOS
+显式设置每个 CoreGraphics 事件的 flags。规则共用，原生状态表达留在各自后端。
+`KeyChord` 解析时生成具体注入序列，
 原始通用修饰键仍用于输入匹配与配置导出；具体键与原始键相同时共用切片。激活键改为索引，
 原始和注入键共用一个 Vec，避免增大 KeyChord 结构体。发送通常直接借用已编译序列；只有当前
 物理/显式保持状态要求省略目标成员时才筛选到内联 SmallVec。物理修饰键也使用借用列表。

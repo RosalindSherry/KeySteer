@@ -564,6 +564,10 @@ impl Backend for MacOsBackend {
         self.keyboard.send_chord(keys)
     }
 
+    fn send_chord_suspending(&self, keys: &[Key], modifiers: &[Key]) -> Result<(), String> {
+        self.keyboard.send_chord_suspending(keys, modifiers)
+    }
+
     fn set_frame_clock(&mut self, active: bool) -> Result<(), String> {
         if active {
             let source = self.overlay.display_link_source()?;

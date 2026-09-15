@@ -1,5 +1,11 @@
 # 构建、打包、文档站与测试
 
+macOS `mapped_keyboard_events_*` 回归覆盖左右四类修饰键的全部非空组合、重复发送、
+目标左右修饰键的释放顺序、保留修饰键和逐事件 Caps Lock/NumericPad 属性。
+这些测试在 macOS target 下编译和执行；Windows 的交叉检查仅确认可编译，不能替代原生运行。
+原生验收需确认 Primary+H/J/K/L 只移动一个方向、长按重复、源键松开后无残留，
+目标显式配置 Command/Shift 时才执行对应组合；普通 C+H/J/K/L 与未映射 Command 快捷键保持有效。
+
 映射发送性能探针 `mapped_chord_preparation_performance` 用 release 模式单线程 ignored 测试
 测量 Engine 准备阶段（不注入系统输入），覆盖无修饰键、Alt、目标 Ctrl+Shift 和多源修饰键。
 也覆盖目标 Ctrl 已由右 Ctrl 按住时的动态筛选。每组预热后循环 200,000 次并检查零分配；

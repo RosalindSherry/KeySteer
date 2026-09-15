@@ -249,6 +249,13 @@ item、window 和 display link 都有线程亲和性。
   全部键码再注入。输入注入使用 `objc2-core-graphics` 的 typed retained/borrowed API，
   `input.rs` 编译期 `forbid(unsafe_code)`；正向键码使用由反向表同源生成的编译期 `match`，
   修饰键 Hook 复用预热 `Key`。
+- 映射目标和需要排除的源修饰键由公共 Engine 决定，macOS 实现同一个
+  `Backend::send_chord_suspending` 协议。CoreGraphics 键盘事件不能依赖先发 modifier-up 来
+  清除 HIDSystemState 的物理 flags：`ChordEventFlags` 在每个目标事件上明确设置 flags，
+  清除被排除源键的设备位并重算家族通用位，跟踪目标修饰键 down/up，保留未被排除的保持状态，
+  包括同一家族仍按住的另一侧目标键。
+  Caps Lock、NumericPad 等非修饰属性逐事件保留。源物理修饰键无需补发 up/down；没有等待
+  或新分配的事件列表。Windows 继续使用现有原子 SendInput 批次实现同一公共决策。
 
 ### 子模块
 

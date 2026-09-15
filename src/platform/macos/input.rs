@@ -154,6 +154,14 @@ impl KeyboardInjector {
     }
 
     pub(super) fn send_chord(&self, keys: &[Key]) -> Result<(), String> {
+        self.send_chord_suspending(keys, &[])
+    }
+
+    pub(super) fn send_chord_suspending(
+        &self,
+        keys: &[Key],
+        modifiers: &[Key],
+    ) -> Result<(), String> {
         // Validate the complete chord before posting its first edge so an
         // unsupported member cannot leave an earlier modifier pressed.
         for key in keys {
@@ -162,21 +170,22 @@ impl KeyboardInjector {
             }
         }
         let source = self.source()?;
+        let mut flags = ChordEventFlags::new(modifiers);
         for (pressed, key) in keys.iter().enumerate() {
-            if let Err(error) = post_key_event(source, key, KeyState::Down) {
+            if let Err(error) = post_chord_key_event(source, key, KeyState::Down, &mut flags) {
                 let mut errors = crate::support::errors::ErrorBundle::default();
                 errors.push(format!("press {key}"), error);
                 for pressed_key in keys[..pressed].iter().rev() {
                     errors.record(
                         format!("compensating release {pressed_key}"),
-                        post_key_event(source, pressed_key, KeyState::Up),
+                        post_chord_key_event(source, pressed_key, KeyState::Up, &mut flags),
                     );
                 }
                 return errors.into_result();
             }
         }
         for key in keys.iter().rev() {
-            if let Err(error) = post_key_event(source, key, KeyState::Up) {
+            if let Err(error) = post_chord_key_event(source, key, KeyState::Up, &mut flags) {
                 // Key-up is idempotent. Releasing the complete chord is safer
                 // than trying to infer which native posts reached the session.
                 let mut errors = crate::support::errors::ErrorBundle::default();
@@ -184,7 +193,7 @@ impl KeyboardInjector {
                 for pressed_key in keys.iter().rev() {
                     errors.record(
                         format!("compensating release {pressed_key}"),
-                        post_key_event(source, pressed_key, KeyState::Up),
+                        post_chord_key_event(source, pressed_key, KeyState::Up, &mut flags),
                     );
                 }
                 return errors.into_result();
@@ -443,6 +452,147 @@ fn post_key_event(source: &CGEventSource, key: &Key, state: KeyState) -> Result<
     Ok(())
 }
 
+// The Engine supplies the same suspension decision on every platform. macOS
+// carries modifier state on each event; posting an Up alone does not prevent a
+// subsequent HIDSystemState event from inheriting the physical modifier again.
+struct ChordEventFlags {
+    suppressed: u64,
+    current: Option<u64>,
+}
+
+const KEYBOARD_MODIFIER_MASK: u64 = 0x0080_0000
+    | NativeEventFlags::MaskShift.bits()
+    | NativeEventFlags::MaskControl.bits()
+    | NativeEventFlags::MaskAlternate.bits()
+    | NativeEventFlags::MaskCommand.bits()
+    | LEFT_CTRL_DEVICE_FLAG
+    | RIGHT_CTRL_DEVICE_FLAG
+    | LEFT_SHIFT_DEVICE_FLAG
+    | RIGHT_SHIFT_DEVICE_FLAG
+    | LEFT_OPTION_DEVICE_FLAG
+    | RIGHT_OPTION_DEVICE_FLAG
+    | LEFT_COMMAND_DEVICE_FLAG
+    | RIGHT_COMMAND_DEVICE_FLAG;
+
+fn keyboard_modifier_flags(key: &Key) -> (u64, u64, u64) {
+    let (side, family, sides) = match key.as_str() {
+        "left_shift" | "right_shift" => (
+            if key.as_str() == "left_shift" {
+                LEFT_SHIFT_DEVICE_FLAG
+            } else {
+                RIGHT_SHIFT_DEVICE_FLAG
+            },
+            NativeEventFlags::MaskShift.bits(),
+            LEFT_SHIFT_DEVICE_FLAG | RIGHT_SHIFT_DEVICE_FLAG,
+        ),
+        "left_ctrl" | "right_ctrl" => (
+            if key.as_str() == "left_ctrl" {
+                LEFT_CTRL_DEVICE_FLAG
+            } else {
+                RIGHT_CTRL_DEVICE_FLAG
+            },
+            NativeEventFlags::MaskControl.bits(),
+            LEFT_CTRL_DEVICE_FLAG | RIGHT_CTRL_DEVICE_FLAG,
+        ),
+        "left_alt" | "right_alt" => (
+            if key.as_str() == "left_alt" {
+                LEFT_OPTION_DEVICE_FLAG
+            } else {
+                RIGHT_OPTION_DEVICE_FLAG
+            },
+            NativeEventFlags::MaskAlternate.bits(),
+            LEFT_OPTION_DEVICE_FLAG | RIGHT_OPTION_DEVICE_FLAG,
+        ),
+        "left_win" | "right_win" => (
+            if key.as_str() == "left_win" {
+                LEFT_COMMAND_DEVICE_FLAG
+            } else {
+                RIGHT_COMMAND_DEVICE_FLAG
+            },
+            NativeEventFlags::MaskCommand.bits(),
+            LEFT_COMMAND_DEVICE_FLAG | RIGHT_COMMAND_DEVICE_FLAG,
+        ),
+        "fn" => (0, 0x0080_0000, 0),
+        _ => (0, 0, 0),
+    };
+    (side, family, sides)
+}
+
+impl ChordEventFlags {
+    fn new(modifiers: &[Key]) -> Self {
+        let suppressed = modifiers.iter().fold(0, |mask, key| {
+            let (side, family, _) = keyboard_modifier_flags(key);
+            mask | family | side
+        });
+        Self {
+            suppressed,
+            current: None,
+        }
+    }
+
+    fn advance(&mut self, inherited: u64, key: &Key, state: KeyState) -> u64 {
+        let flags = self.current.get_or_insert_with(|| {
+            let mut flags = inherited & KEYBOARD_MODIFIER_MASK & !self.suppressed;
+            // Suppressing one side must not erase a retained target on the
+            // other side of the same family (e.g. LeftCtrl -> RightCtrl+J).
+            for (family, sides) in [
+                (
+                    NativeEventFlags::MaskShift.bits(),
+                    LEFT_SHIFT_DEVICE_FLAG | RIGHT_SHIFT_DEVICE_FLAG,
+                ),
+                (
+                    NativeEventFlags::MaskControl.bits(),
+                    LEFT_CTRL_DEVICE_FLAG | RIGHT_CTRL_DEVICE_FLAG,
+                ),
+                (
+                    NativeEventFlags::MaskAlternate.bits(),
+                    LEFT_OPTION_DEVICE_FLAG | RIGHT_OPTION_DEVICE_FLAG,
+                ),
+                (
+                    NativeEventFlags::MaskCommand.bits(),
+                    LEFT_COMMAND_DEVICE_FLAG | RIGHT_COMMAND_DEVICE_FLAG,
+                ),
+            ] {
+                if flags & sides != 0 {
+                    flags |= family;
+                }
+            }
+            flags
+        });
+        let (side, family, sides) = keyboard_modifier_flags(key);
+        match state {
+            KeyState::Down => *flags |= side | family,
+            KeyState::Up => {
+                *flags &= !side;
+                if *flags & sides == 0 {
+                    *flags &= !family;
+                }
+            }
+        }
+        // Numeric-pad, Caps Lock, and other event properties belong to each
+        // newly created event, not to the first key of the chord.
+        (inherited & !KEYBOARD_MODIFIER_MASK) | *flags
+    }
+}
+
+fn post_chord_key_event(
+    source: &CGEventSource,
+    key: &Key,
+    state: KeyState,
+    flags: &mut ChordEventFlags,
+) -> Result<(), String> {
+    let code = keycode_for(key).ok_or_else(|| format!("no macOS keycode for {key}"))?;
+    let event = CGEvent::new_keyboard_event(source.clone(), code, state == KeyState::Down)
+        .map_err(|_| format!("cannot create a key event for {key}"))?;
+    let current = flags.advance(event.get_flags().bits(), key, state);
+    event.set_flags(core_graphics::event::CGEventFlags::from_bits_retain(
+        current,
+    ));
+    event.set_integer_value_field(EventField::EVENT_SOURCE_USER_DATA, INJECTED_TAG);
+    event.post(CGEventTapLocation::HID);
+    Ok(())
+}
+
 /// Virtual keycode table, ordered to mirror `keycode_for`.
 macro_rules! macos_keycodes {
     ($(($code:expr, $name:literal)),+ $(,)?) => {
@@ -600,6 +750,65 @@ pub fn modifier_is_down(flags: u64, key: &Key) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mapped_keyboard_events_remove_all_source_modifier_combinations() {
+        for side in ["left", "right"] {
+            for combination in 1..16 {
+                let modifiers: Vec<_> = ["ctrl", "alt", "shift", "win"]
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(bit, _)| combination & (1 << bit) != 0)
+                    .map(|(_, family)| Key::new(format!("{side}_{family}")).unwrap())
+                    .collect();
+                let inherited = modifiers.iter().fold(0, |bits, key| {
+                    let (side, family, _) = keyboard_modifier_flags(key);
+                    bits | side | family
+                });
+                for _ in 0..3 {
+                    let mut flags = ChordEventFlags::new(&modifiers);
+                    let arrow = Key::new("arrow_down").unwrap();
+                    assert_eq!(
+                        flags.advance(inherited | 0x0001_0000, &arrow, KeyState::Down),
+                        0x0001_0000
+                    );
+                    assert_eq!(
+                        flags.advance(inherited | 0x0020_0000, &arrow, KeyState::Up),
+                        0x0020_0000
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn mapped_keyboard_events_track_target_sides_and_preserve_retained_modifiers() {
+        let command = Key::new("left_win").unwrap();
+        let left = Key::new("left_ctrl").unwrap();
+        let right = Key::new("right_ctrl").unwrap();
+        let arrow = Key::new("arrow_down").unwrap();
+        let inherited = NativeEventFlags::MaskCommand.bits()
+            | LEFT_COMMAND_DEVICE_FLAG
+            | NativeEventFlags::MaskShift.bits()
+            | RIGHT_SHIFT_DEVICE_FLAG;
+        let mut flags = ChordEventFlags::new(&[command]);
+        let retained = NativeEventFlags::MaskShift.bits() | RIGHT_SHIFT_DEVICE_FLAG;
+        flags.advance(inherited, &left, KeyState::Down);
+        flags.advance(inherited, &right, KeyState::Down);
+        flags.advance(inherited, &right, KeyState::Up);
+        assert_eq!(
+            flags.advance(inherited, &arrow, KeyState::Down),
+            retained | NativeEventFlags::MaskControl.bits() | LEFT_CTRL_DEVICE_FLAG
+        );
+        assert_eq!(flags.advance(inherited, &left, KeyState::Up), retained);
+        let mut flags = ChordEventFlags::new(&[left]);
+        let both =
+            NativeEventFlags::MaskControl.bits() | LEFT_CTRL_DEVICE_FLAG | RIGHT_CTRL_DEVICE_FLAG;
+        assert_eq!(
+            flags.advance(both, &arrow, KeyState::Down),
+            NativeEventFlags::MaskControl.bits() | RIGHT_CTRL_DEVICE_FLAG
+        );
+    }
 
     #[test]
     fn movement_uses_dragged_event_for_the_held_button() {

@@ -1,5 +1,11 @@
 # 更新日志 / Release Notes
 
+## 0.10.9
+
+- 优化 Windows 和 macOS 上的键盘映射，让组合键不再误带入正在按住的 Ctrl、Alt、Shift 或 Command，使用更稳定流畅。
+
+- Improved keyboard mappings on Windows and macOS so shortcuts no longer accidentally inherit held Ctrl, Alt, Shift, or Command keys and feel smoother and more reliable.
+
 ## 0.10.8
 
 - 修复自定义组合键的前缀字符提前透传的问题，
