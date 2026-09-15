@@ -21,6 +21,11 @@ pub(crate) struct Snapshot {
 }
 
 pub(crate) trait WindowAccess {
+    /// Bound temporary native objects to a work batch, never to the idle wait.
+    fn native_batch<R>(work: impl FnOnce() -> R) -> R {
+        work()
+    }
+
     fn set_scope(&mut self, _scope: Option<crate::api::window::WindowScope>, _reset: bool) {}
     /// Optional native message-loop wakeup, created on the worker thread.
     fn event_waker(&self) -> Option<Arc<dyn Fn() + Send + Sync>> {
@@ -299,7 +304,7 @@ impl WindowWorker {
             "window-manager",
             std::thread::Builder::new().name("keysteer-window".into()),
             move || {
-                let native = create();
+                let native = A::native_batch(create);
                 if let Some(wake) = native.event_waker() {
                     let _ = input.native_waker.set(wake);
                 }
@@ -308,13 +313,16 @@ impl WindowWorker {
                 let mut session = Session::default();
                 let mut displays = Vec::new();
                 loop {
-                    let audio_active = access.maintain_audio();
-                    if access.persistent()
-                        && let Err(error) =
-                            access.pump(&displays, &|| input.stop.load(Ordering::Acquire))
-                    {
-                        emit(BackendEvent::Warning(format!("window tabs: {error}")));
-                    }
+                    let audio_active = A::native_batch(|| {
+                        let active = access.maintain_audio();
+                        if access.persistent()
+                            && let Err(error) =
+                                access.pump(&displays, &|| input.stop.load(Ordering::Acquire))
+                        {
+                            emit(BackendEvent::Warning(format!("window tabs: {error}")));
+                        }
+                        active
+                    });
                     let pending = {
                         let mut queue = input.queue.lock().unwrap_or_else(|e| e.into_inner());
                         while queue.is_empty() && !input.stop.load(Ordering::Acquire) {
@@ -326,9 +334,11 @@ impl WindowWorker {
                                     input.native_waiting.store(true, Ordering::Release);
                                     drop(queue);
                                     if !input.stop.load(Ordering::Acquire) {
-                                        access.wait_for_events(
-                                            audio_active.then_some(Duration::from_millis(250)),
-                                        );
+                                        A::native_batch(|| {
+                                            access.wait_for_events(
+                                                audio_active.then_some(Duration::from_millis(250)),
+                                            )
+                                        });
                                     }
                                     input.native_waiting.store(false, Ordering::Release);
                                     queue = input.queue.lock().unwrap_or_else(|e| e.into_inner());
@@ -358,101 +368,107 @@ impl WindowWorker {
                     let Some(pending) = pending else {
                         continue;
                     };
-                    let (request, screens) = match pending {
-                        Pending::Audio(request, cancelled) => {
-                            if cancelled.load(Ordering::Acquire) {
-                                continue;
-                            }
-                            if let Some(factory) = access.audio_factory() {
-                                let (session, id) = (request.session, request.id);
-                                let submitted = (|| {
-                                    let process = access.audio_process(request.target)?;
-                                    if audio.is_none() {
-                                        audio = Some(super::audio_worker::AudioWorker::start(
-                                            factory,
-                                            emit.clone(),
-                                        )?);
+                    A::native_batch(|| {
+                        let (request, screens) = match pending {
+                            Pending::Audio(request, cancelled) => {
+                                if cancelled.load(Ordering::Acquire) {
+                                    return;
+                                }
+                                if let Some(factory) = access.audio_factory() {
+                                    let (session, id) = (request.session, request.id);
+                                    let submitted = (|| {
+                                        let process = access.audio_process(request.target)?;
+                                        if audio.is_none() {
+                                            audio = Some(super::audio_worker::AudioWorker::start(
+                                                factory,
+                                                emit.clone(),
+                                            )?);
+                                        }
+                                        audio.as_ref().ok_or("audio worker unavailable")?.submit(
+                                            request,
+                                            process,
+                                            cancelled.clone(),
+                                        )
+                                    })();
+                                    if let Err(error) = submitted
+                                        && !cancelled.load(Ordering::Acquire)
+                                    {
+                                        super::audio_worker::publish_result(
+                                            &emit,
+                                            crate::api::audio::AudioResult {
+                                                session,
+                                                id,
+                                                outcome: Err(error),
+                                            },
+                                        );
                                     }
-                                    audio.as_ref().ok_or("audio worker unavailable")?.submit(
-                                        request,
-                                        process,
-                                        cancelled.clone(),
-                                    )
-                                })();
-                                if let Err(error) = submitted
-                                    && !cancelled.load(Ordering::Acquire)
-                                {
-                                    super::audio_worker::publish_result(
-                                        &emit,
-                                        crate::api::audio::AudioResult {
-                                            session,
-                                            id,
-                                            outcome: Err(error),
-                                        },
-                                    );
+                                } else {
+                                    // Portable test/adaptor fallback; native platforms
+                                    // always supply the independent audio factory.
+                                    let result = execute_audio(&access, request);
+                                    if !cancelled.load(Ordering::Acquire) {
+                                        super::audio_worker::publish_result(&emit, result);
+                                    }
                                 }
-                            } else {
-                                // Portable test/adaptor fallback; native platforms
-                                // always supply the independent audio factory.
-                                let result = execute_audio(&access, request);
-                                if !cancelled.load(Ordering::Acquire) {
-                                    super::audio_worker::publish_result(&emit, result);
-                                }
+                                return;
                             }
-                            continue;
+                            Pending::Window { request, screens } => (request, screens),
+                        };
+                        let id = request.session;
+                        let acquisition = matches!(
+                            request.operation,
+                            WindowOperation::Acquire(_) | WindowOperation::EndEdit { .. }
+                        );
+                        let query = matches!(request.operation, WindowOperation::Enumerate);
+                        let request_id = request.id;
+                        let cancelled = || {
+                            input.stop.load(Ordering::Acquire)
+                                || input.session.load(Ordering::Acquire) != id
+                                || (!acquisition
+                                    && request_id < input.cancel_before.load(Ordering::Acquire))
+                                || (query
+                                    && request_id < input.query_before.load(Ordering::Acquire))
+                        };
+                        if cancelled() {
+                            if input.session.load(Ordering::Acquire) == 0 {
+                                session.cleanup_edit(&mut access);
+                                access.end_session();
+                                session = Session::default();
+                            }
+                            return;
                         }
-                        Pending::Window { request, screens } => (request, screens),
-                    };
-                    let id = request.session;
-                    let acquisition = matches!(
-                        request.operation,
-                        WindowOperation::Acquire(_) | WindowOperation::EndEdit { .. }
-                    );
-                    let query = matches!(request.operation, WindowOperation::Enumerate);
-                    let request_id = request.id;
-                    let cancelled = || {
-                        input.stop.load(Ordering::Acquire)
-                            || input.session.load(Ordering::Acquire) != id
-                            || (!acquisition
-                                && request_id < input.cancel_before.load(Ordering::Acquire))
-                            || (query && request_id < input.query_before.load(Ordering::Acquire))
-                    };
-                    if cancelled() {
-                        if input.session.load(Ordering::Acquire) == 0 {
+                        // Cancellation wakeups carry no displays. Only accepted
+                        // requests may replace the persistent groups' geometry context.
+                        displays.clone_from(&screens);
+                        if session.id != id {
                             session.cleanup_edit(&mut access);
                             access.reset();
-                            session = Session::default();
+                            session = Session {
+                                id,
+                                ..Session::default()
+                            };
                         }
-                        continue;
-                    }
-                    // Cancellation wakeups carry no displays. Only accepted
-                    // requests may replace the persistent groups' geometry context.
-                    displays.clone_from(&screens);
-                    if session.id != id {
-                        session.cleanup_edit(&mut access);
-                        access.reset();
-                        session = Session {
-                            id,
-                            ..Session::default()
-                        };
-                    }
-                    let result = session.execute(&mut access, request, &screens, &cancelled);
-                    if !cancelled() {
-                        emit(BackendEvent::WindowResult(Box::new(result)));
-                    } else {
-                        session.pending_closed.extend(result.closed);
-                    }
-                    // Deliver feedback before file I/O; errors never delay the
-                    // acknowledgement or run on the engine's keyboard thread.
-                    if let Some(error) = session.error.take() {
-                        crate::report_error!(
-                            "window-worker",
-                            "session={id} request={request_id}: {error}"
-                        );
-                    }
+                        let result = session.execute(&mut access, request, &screens, &cancelled);
+                        if !cancelled() {
+                            emit(BackendEvent::WindowResult(Box::new(result)));
+                        } else {
+                            session.pending_closed.extend(result.closed);
+                        }
+                        // Deliver feedback before file I/O; errors never delay the
+                        // acknowledgement or run on the engine's keyboard thread.
+                        if let Some(error) = session.error.take() {
+                            crate::report_error!(
+                                "window-worker",
+                                "session={id} request={request_id}: {error}"
+                            );
+                        }
+                    });
                 }
-                session.cleanup_edit(&mut access);
-                access.shutdown();
+                A::native_batch(|| {
+                    session.cleanup_edit(&mut access);
+                    access.shutdown();
+                    drop(access);
+                });
             },
         )?;
         Ok(Self { mailbox, worker })
@@ -1820,6 +1836,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     struct Fake {
+        reset_notification: Option<std::sync::mpsc::Sender<()>>,
         windows: BTreeMap<WindowId, Snapshot>,
         writes: Vec<WindowId>,
         reject: Option<WindowId>,
@@ -1857,6 +1874,7 @@ mod tests {
     impl Fake {
         fn new(count: u64) -> Self {
             Self {
+                reset_notification: None,
                 windows: (1..=count)
                     .map(|id| {
                         let bounds = Rect::new(-1100.0 + id as f64 * 20.0, 150.0, 320.0, 240.0);
@@ -2012,7 +2030,12 @@ mod tests {
         fn logical_scale(&self, screen: &Screen) -> f64 {
             screen.scale
         }
-        fn reset(&mut self) {}
+        fn reset(&mut self) {
+            if let Some(tx) = &self.reset_notification {
+                self.windows.clear();
+                let _ = tx.send(());
+            }
+        }
     }
 
     fn run(session: &mut Session, access: &mut Fake, operation: WindowOperation) -> WindowResult {
@@ -2194,6 +2217,42 @@ mod tests {
         );
         assert_eq!(result.outcome.as_deref(), Err(&"closed".to_string()));
         assert_eq!(access.volume_requests.borrow().len(), 1);
+    }
+
+    #[test]
+    fn cancellation_releases_inventory_before_worker_shutdown() {
+        let (reset_tx, reset_rx) = std::sync::mpsc::channel();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut worker = WindowWorker::start(
+            move || {
+                let mut fake = Fake::new(4);
+                fake.reset_notification = Some(reset_tx);
+                fake
+            },
+            move |event| {
+                tx.send(event).unwrap();
+            },
+        )
+        .unwrap();
+        worker
+            .submit(
+                WindowRequest {
+                    session: 7,
+                    id: 1,
+                    scope: None,
+                    operation: WindowOperation::Acquire(Point::new(-1000.0, 200.0)),
+                },
+                &screens(),
+            )
+            .unwrap();
+        rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(reset_rx.try_recv().is_err());
+        worker.cancel(7);
+        reset_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        // The worker is still alive and idle; cleanup must not depend on Drop.
+        worker
+            .stop_until(Instant::now() + Duration::from_secs(2))
+            .unwrap();
     }
 
     #[test]

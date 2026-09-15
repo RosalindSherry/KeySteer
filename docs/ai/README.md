@@ -141,3 +141,5 @@ Window 的 S 切换同步鼠标下 Move/Resize，见 [API](02-runtime-and-api.md
 
 
 卡片数值化运行时数据、屏幕排列短路径和零分配样式复用见 [配置](03-configuration.md) 与 [性能](07-rendering-and-performance.md)。
+
+Window 退出后的跨平台库存回收、macOS 窗口 worker／标签栏局部自动释放池见 [后端](06-platform-backends.md)、[性能](07-rendering-and-performance.md) 与 [验证](08-build-docs-and-tests.md)。

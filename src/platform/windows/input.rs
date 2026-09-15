@@ -1101,7 +1101,9 @@ mod tests {
                 let mut held = modifiers.clone();
                 let mut arrows = 0;
                 for input in batch.as_slice() {
-                    // SAFETY: mapped_chord_inputs constructs only INPUT_KEYBOARD values.
+                    assert_eq!(input.r#type, INPUT_KEYBOARD);
+                    // SAFETY: mapped_chord_inputs constructs only INPUT_KEYBOARD
+                    // values; the tag above also checks the active union member.
                     let key = unsafe { input.Anonymous.ki };
                     let code = key.wVk.0;
                     if code == 0xE8 {

@@ -1,5 +1,11 @@
 # 更新日志 / Release Notes
 
+## 0.10.10
+
+- 优化 Windows 和 macOS 的 Window 模式资源回收。
+
+- Improved resource cleanup in Window mode on Windows and macOS.
+
 ## 0.10.9
 
 - 优化 Windows 和 macOS 上的键盘映射，让组合键不再误带入正在按住的 Ctrl、Alt、Shift 或 Command，使用更稳定流畅。

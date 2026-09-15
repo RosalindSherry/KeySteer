@@ -439,3 +439,9 @@ never maximizes first. A minimized target, or a maximized target under the
 maximize toggle, returns to its saved normal geometry. Grouped delegates to the
 active member and retains group minimization/header handling. Legacy cycle_state
 is retained for explicit size_cycle bindings. Modes send API requests only.
+
+## Window 会话资源回收
+
+窗口 worker 的 `WindowAccess::native_batch` 在平台侧限定临时对象寿命：macOS 用局部 autorelease pool 包住创建、请求执行、原生事件处理与 shutdown；Windows 默认直接执行。请求批次在进入 mailbox 空闲等待前完成释放；原生等待使用独立批次。macOS 主线程标签栏 refresh 同样独立包池，不能依赖下一次 AppKit 事件轮询回收此前生成的对象。
+
+完整取消会话调用 `Grouped::end_session`：没有持久组和待恢复隐藏窗口时释放原生窗口身份、AX 引用／Win32 property、库存、编号和分组历史缓存。持久组继续保留成员、历史和事件跟随；普通 reset／模式交接不触发这一回收。清理在既有 worker 上执行，不关闭 worker、不引入周期 timer，也不在 Engine 等待清理。

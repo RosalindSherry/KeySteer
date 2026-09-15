@@ -380,3 +380,13 @@ macOS 原生性能：`python3 tools/test-macos-windows.py --performance --releas
 显式目标修饰键。Windows `mapped_chord_*` 检查原生批次中方向键期间无多余修饰键、批次结束
 状态恢复、已松开的源键不恢复，以及常见组合的内联存储。Notepad4 原生验收应确认 Primary+J/K
 只移动光标，长按重复，松开 Alt 不打开菜单，未映射 Alt 快捷键仍有效。
+
+Window 资源回收回归：`cancellation_releases_inventory_before_worker_shutdown` 经真实 worker 队列验证取消后、线程仍活着时释放原生库存；`ended_ungrouped_session_releases_native_inventory_and_cached_snapshots` 验证无组会话缓存和历史容量释放；`ended_grouped_session_preserves_live_members_and_history` 与已有 worker_exit 测试验证持久组继续跟随。Mac 实机需用相同窗口集合重复进入／退出 Window 至少 30 次，同时记录 Activity Monitor footprint、resident 与 Instruments Allocations／Leaks；Windows 对应记录 private bytes、working set 和 handles。对比冷启动、首次进入、退出和重复周期平台值，并测重入／连续移动延迟；交叉编译和逻辑测试不证明实际内存降幅或帧延迟。
+
+## 三项维护门禁的边界
+
+API 默认 `send_chord_suspending` 自行汇总错误，恢复全部源修饰键后再返回失败，不依赖 support；`default_mapped_chord_restores_all_sources_after_suspension_failure` 验证暂停失败也会执行全部恢复。架构依赖规则保持不变。
+
+Windows input 的 unsafe 文件预算为 9：新增的一处仅在 mapped-chord 测试中读取 `INPUT.Anonymous.ki`，读取前断言类型为 `INPUT_KEYBOARD`；生产 unsafe 数量不变；总预算对应从 368 增至 369，其他文件预算不变。
+
+2000 目标 owned Hint 交付预算仍为最多 15 次分配；字节预算为 472,920 字节的其他开销加 2000 × 104 字节的标签数组，共 680,920 字节。原 632,920 字节预算对应 80 字节标签；placement 和 connector 增加的 24 字节已由 overlay 结构大小测试独立限制。预算使用固定上限，不随实际结构大小自动增长；首批目标数组继续按所有权接管，禁止恢复深复制。全局分配统计需单独、单线程执行。

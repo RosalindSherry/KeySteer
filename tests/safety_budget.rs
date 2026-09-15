@@ -40,7 +40,8 @@ use std::path::{Path, PathBuf};
 // endpoint/property blocks and one non-disruptive native policy probe. The
 // versioned policy adapter adds three exact ABI slots and four scoped call blocks.
 // Two audited Objective-C protocol conformances for deferred system termination.
-const MAX_UNSAFE_EXPRESSIONS: usize = 368;
+// One test-only INPUT_KEYBOARD union read verifies mapped-chord restoration.
+const MAX_UNSAFE_EXPRESSIONS: usize = 369;
 const MAX_UNSAFE_FILES: usize = 31;
 const PER_FILE_BUDGET: &[(&str, usize)] = &[
     // macOS audio owns, changes, maintains and destroys native state,
@@ -67,7 +68,10 @@ const PER_FILE_BUDGET: &[(&str, usize)] = &[
     ("src/platform/windows/autostart.rs", 4),
     ("src/platform/windows/gpu_overlay.rs", 28),
     ("src/platform/windows/hook.rs", 8),
-    ("src/platform/windows/input.rs", 8),
+    // Includes a test-only read of INPUT.Anonymous.ki for mapped-chord
+    // modifier restoration. The batch constructor activates INPUT_KEYBOARD;
+    // no pointer dereference, native call or production unsafe block is added.
+    ("src/platform/windows/input.rs", 9),
     ("src/platform/windows/overlay.rs", 9),
     ("src/platform/windows/screens.rs", 5),
     ("src/platform/windows/window_mover.rs", 4),

@@ -1608,3 +1608,38 @@ fn close_to_tray_retires_only_after_completed_inventory_and_compacts_numbers() {
     access.enumerate(&screens(), &|| false).unwrap();
     assert_eq!(access.groups.state.numbers.last(), Some(&(WindowId(2), 4)));
 }
+
+#[test]
+fn ended_ungrouped_session_releases_native_inventory_and_cached_snapshots() {
+    let mut access = setup();
+    choose(&mut access, 1);
+    choose(&mut access, 2);
+    op(&mut access, TabOperation::Dissolve);
+    assert!(!access.persistent());
+    assert!(!access.history.is_empty());
+    assert!(!access.native.windows.is_empty());
+    access.end_session();
+    assert!(access.native.windows.is_empty());
+    assert!(access.observed.is_empty());
+    assert!(access.groups.state.numbers.is_empty());
+    assert_eq!(access.history.capacity(), 0);
+    assert_eq!(access.redo.capacity(), 0);
+    assert_eq!(access.bars.capacity(), 0);
+    assert_eq!(access.watched.capacity(), 0);
+    assert!(access.scope.is_none());
+}
+
+#[test]
+fn ended_grouped_session_preserves_live_members_and_history() {
+    let mut access = setup();
+    choose(&mut access, 1);
+    choose(&mut access, 2);
+    let state = access.tab_state().unwrap();
+    let history = access.history.len();
+    access.end_session();
+    assert!(access.persistent());
+    assert_eq!(access.tab_state().unwrap().groups, state.groups);
+    assert_eq!(access.history.len(), history);
+    assert_eq!(access.native.windows.len(), 4);
+    access.pump(&screens(), &|| false).unwrap();
+}

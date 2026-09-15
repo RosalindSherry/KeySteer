@@ -210,21 +210,26 @@ pub trait Backend {
     /// transition in one input request and recheck physical state on execution.
     fn send_chord_suspending(&self, keys: &[Key], modifiers: &[Key]) -> Result<(), String> {
         use super::input::KeyState;
-        let mut errors = crate::support::errors::ErrorBundle::default();
         let result = (|| {
             for modifier in modifiers.iter().rev() {
                 self.send_key(modifier, KeyState::Up)?;
             }
             self.send_chord(keys)
         })();
-        errors.record("mapped chord", result);
+        let mut failure = result.err().map(|error| format!("mapped chord: {error}"));
         for modifier in modifiers {
-            errors.record(
-                "restore source modifier",
-                self.send_key(modifier, KeyState::Down),
-            );
+            if let Err(error) = self.send_key(modifier, KeyState::Down) {
+                // Always attempt every restoration, including after an earlier
+                // failure. Keep the default API implementation self-contained.
+                let message = failure.get_or_insert_with(String::new);
+                if !message.is_empty() {
+                    message.push_str("; ");
+                }
+                message.push_str("restore source modifier: ");
+                message.push_str(&error);
+            }
         }
-        errors.into_result()
+        failure.map_or(Ok(()), Err)
     }
 
     /// Start or stop native display-synchronised frame delivery.

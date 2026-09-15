@@ -1446,3 +1446,16 @@ fn click_prefix_is_not_injected_when_a_longer_chord_wins() {
         }
     }
 }
+
+#[test]
+fn default_mapped_chord_restores_all_sources_after_suspension_failure() {
+    let (backend, log) = FakeBackend::new(vec![]);
+    log.lock().unwrap().fail_next_key_up = true;
+    let modifiers = [Key::new("alt").unwrap(), Key::new("shift").unwrap()];
+    let result = backend.send_chord_suspending(&[Key::new("down").unwrap()], &modifiers);
+    assert_eq!(result, Err("mapped chord: injected key-up failure".into()));
+    assert_eq!(log.lock().unwrap().sent, [
+        ("alt".to_string(), KeyState::Down),
+        ("shift".to_string(), KeyState::Down),
+    ]);
+}

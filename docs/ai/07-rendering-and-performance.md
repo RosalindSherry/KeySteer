@@ -395,3 +395,5 @@ WindowView.configurable_position 仅对 Move／Editor 开启。EditorCard 仅保
 
 
 样式编译后仅保留 WindowCardMetrics 数值和共享绘制样式，不保留 WindowCardUi 字符串／颜色 DTO；中心比例提前派生。屏幕集中排列跳过逐窗口锚点 Vec 和区域查询，编号位数使用整数运算。动态窗口几何、屏幕 DPI、行列和碰撞仍在当前场景计算，避免静态缓存导致过期位置。测试验证 1000 次主题样式选择与共享引用克隆无堆分配。
+
+Window 退出的资源回收见 [原生后端](06-platform-backends.md#window-会话资源回收)。活动期间的 overlay、字体和几何快路径保持复用；无持久组的会话结束才释放窗口库存缓存。macOS 标签栏刷新和窗口 worker 批次使用各自的自动释放池，不能将临时 Cocoa 对象留到线程退出。系统显示的 footprint、驻留内存与分配器已释放的内存并不等价；实机比较需固定同一指标，观察重复进入／退出后是否持续增长。

@@ -343,6 +343,10 @@ pub(super) fn clear(mtm: MainThreadMarker) {
     STRIPS.with(|strips| strips.borrow_mut().clear());
 }
 pub(super) fn refresh(mtm: MainThreadMarker, screens: &[Screen]) {
+    objc2::rc::autoreleasepool(|_| refresh_inner(mtm, screens));
+}
+
+fn refresh_inner(mtm: MainThreadMarker, screens: &[Screen]) {
     MAIN_WAKE.with(|slot| {
         if slot.get().is_none()
             && let Some(wake) = super::native::RunLoopWake::new()

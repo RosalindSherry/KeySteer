@@ -1102,6 +1102,29 @@ impl<A: WindowAccess> Grouped<A> {
             self.retired.push(id);
         }
     }
+    /// Release an ended mode session while preserving live native tab groups.
+    pub fn end_session(&mut self) {
+        self.reset();
+        if !self.persistent() {
+            // No group needs identity leases or undo snapshots between sessions.
+            // Keep the worker alive, but release its native inventory and caches.
+            self.native.reset();
+            self.groups = Groups::default();
+            self.history = VecDeque::new();
+            self.redo = VecDeque::new();
+            self.observed.clear();
+            self.bars = Vec::new();
+            self.watched = Vec::new();
+            self.retired = Vec::new();
+            self.pending_bars.clear();
+            self.closing.get_mut().clear();
+            self.interacting.clear();
+            self.screens = Vec::new();
+            self.scope = None;
+            self.numbers_dirty = false;
+        }
+    }
+
     pub fn shutdown(&mut self) {
         if let Err(error) = self.release_visibility(None) {
             crate::report_error!("window-tabs", "{error}");

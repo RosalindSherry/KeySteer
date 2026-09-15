@@ -1,5 +1,9 @@
 # Release notes
 
+## 0.10.10
+
+- Improved resource cleanup in Window mode on Windows and macOS.
+
 ## 0.10.9
 
 - Improved keyboard mappings on Windows and macOS so shortcuts no longer accidentally inherit held Ctrl, Alt, Shift, or Command keys and feel smoother and more reliable.

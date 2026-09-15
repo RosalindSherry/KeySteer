@@ -417,6 +417,10 @@ impl MacWindows {
 }
 
 impl WindowAccess for MacWindows {
+    fn native_batch<R>(work: impl FnOnce() -> R) -> R {
+        objc2::rc::autoreleasepool(|_| work())
+    }
+
     fn event_waker(&self) -> Option<std::sync::Arc<dyn Fn() + Send + Sync>> {
         let wake = self.monitor.waker();
         crate::platform::macos::window_tabs::set_worker_waker(wake.clone());

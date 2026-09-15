@@ -129,8 +129,15 @@ fn warmed_compact_hint_assignment_reuses_two_thousand_labels() {
 fn owned_hint_delivery_stays_within_allocation_budget() {
     const TARGETS: usize = 2_000;
     const MAX_ALLOCATIONS: usize = 15;
-    // The first owned batch no longer allocates a second target array.
-    const MAX_BYTES: usize = 840_920 - TARGETS * std::mem::size_of::<UiTarget>();
+    // Fixed budgets, not size_of-based allowances that silently grow with types.
+    // Original owned-delivery budget: 840_920 - 2_000 * 104 = 632_920.
+    // OverlayLabel grew from 80 to 104 bytes for annotation placement (8) and
+    // connector style (16). One output array therefore needs 48_000 more bytes;
+    // the input UiTarget Vec is still adopted without a copy.
+    const MAX_LABEL_BYTES: usize = 104;
+    const MAX_OTHER_BYTES: usize = 472_920;
+    const MAX_BYTES: usize = MAX_OTHER_BYTES + TARGETS * MAX_LABEL_BYTES;
+    assert!(std::mem::size_of::<crate::api::OverlayLabel>() <= MAX_LABEL_BYTES);
 
     let config = Config::default();
     let palette = config.palette(Appearance::Dark);
