@@ -381,7 +381,7 @@ macOS 原生性能：`python3 tools/test-macos-windows.py --performance --releas
 状态恢复、已松开的源键不恢复，以及常见组合的内联存储。Notepad4 原生验收应确认 Primary+J/K
 只移动光标，长按重复，松开 Alt 不打开菜单，未映射 Alt 快捷键仍有效。
 
-Window 资源回收回归：`cancellation_releases_inventory_before_worker_shutdown` 经真实 worker 队列验证取消后、线程仍活着时释放原生库存；`ended_ungrouped_session_releases_native_inventory_and_cached_snapshots` 验证无组会话缓存和历史容量释放；`ended_grouped_session_preserves_live_members_and_history` 与已有 worker_exit 测试验证持久组继续跟随。Mac 实机需用相同窗口集合重复进入／退出 Window 至少 30 次，同时记录 Activity Monitor footprint、resident 与 Instruments Allocations／Leaks；Windows 对应记录 private bytes、working set 和 handles。对比冷启动、首次进入、退出和重复周期平台值，并测重入／连续移动延迟；交叉编译和逻辑测试不证明实际内存降幅或帧延迟。
+Window 资源回收回归：`cancellation_releases_inventory_before_worker_shutdown` 经真实 worker 队列验证取消后、线程仍活着时释放原生库存；`ended_ungrouped_session_releases_native_inventory_and_cached_snapshots` 验证没有分组历史的会话缓存容量释放；`ended_grouped_session_preserves_live_members_and_history` 与已有 worker_exit 测试验证持久组继续跟随。Mac 实机需用相同窗口集合重复进入／退出 Window 至少 30 次，同时记录 Activity Monitor footprint、resident 与 Instruments Allocations／Leaks；Windows 对应记录 private bytes、working set 和 handles。对比冷启动、首次进入、退出和重复周期平台值，并测重入／连续移动延迟；交叉编译和逻辑测试不证明实际内存降幅或帧延迟。
 
 ## 三项维护门禁的边界
 
@@ -389,6 +389,12 @@ API 默认 `send_chord_suspending` 自行汇总错误，恢复全部源修饰键
 
 Windows input 的 unsafe 文件预算为 9：新增的一处仅在 mapped-chord 测试中读取 `INPUT.Anonymous.ki`，读取前断言类型为 `INPUT_KEYBOARD`；生产 unsafe 数量不变；总预算对应从 368 增至 369，其他文件预算不变。
 
-2000 目标 owned Hint 交付恢复最多 15 次分配、632,920 字节的原预算，普通 OverlayLabel 大小上限恢复 80 字节。窗口 placement／connector 仅在 WindowAnnotations 稀疏表中存储，不扩大普通标签。`window_annotations_are_sparse_shared_and_follow_sorted_merged_labels` 验证无窗口数据时不创建表、未启用引导线不存储样式、clone 共享与写时隔离、排序重映射、多屏合并及序列化往返。引导线避让回归同时覆盖启用和禁用，无样式的标注不生成默认引导线。全局分配统计仍需单独、单线程执行。
+2000 目标 owned Hint 交付恢复最多 15 次分配、632,920 字节的原预算，普通 OverlayLabel 大小上限恢复 80 字节。窗口 placement／connector 仅在 WindowAnnotations 稀疏表中存储，不扩大普通标签。`window_annotations_are_sparse_shared_and_follow_sorted_merged_labels` 验证无窗口数据时不创建表、未启用引导线不存储样式、clone 共享与写时隔离、排序重映射、多屏合并及序列化往返。引导线避让回归同时覆盖启用和禁用，禁用的窗口背景不生成引导线，独立标注保留优化前的默认连接语义。全局分配统计仍需单独、单线程执行。
 
-Window 卡片渲染回归额外从 TOML 分别编译 true／false／true，验证两主题的样式有无、实际场景共享样式和避让后的线条数量，覆盖开关重载。所有标注的默认避让依旧不隐式生成引导线。
+Window 卡片渲染回归额外从 TOML 分别编译 true／false／true，验证两主题的样式有无、实际场景共享样式和避让后的线条数量，覆盖开关重载。窗口背景使用编译样式，独立区域／组号的连接行为以优化前基准为准。
+
+## 优化前行为基准
+
+`window_scenes_match_pre_optimization_baseline` 对照提交 `c7bff963bef83a4a5a2ba67f1458e112e5ac6647` 实际生成的 1296 个 Windows 场景指纹，覆盖浅／深主题、引导线开关、1／5／16 窗口、双屏负坐标和混合 DPI、窗口底部／屏幕底部／屏幕中心位置、树布局及分组编号、重复避让与面板碰撞。比较全部绘制字段，只排除存储迁移的 placement／connector 元数据，浮点坐标以百万分之一像素规范化；基准 fixture 不能从待测实现自动更新。macOS 的紧凑标签物理几何不同，不运行 Windows fixture；跨平台逻辑测试验证任意角度起止点、静止线条不变和缓存一致性，macOS 仍需原生视觉验收。
+
+`window_help_cache_restores_connectors_with_displaced_labels` 验证缓存与重建一致，源线条变化导致失效；`ended_dissolved_session_preserves_undo_and_redo` 验证退出后仍能撤销解散、重做分组。不能通过删除历史或放宽分配门禁换取优化。

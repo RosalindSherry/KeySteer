@@ -1575,3 +1575,35 @@ fn audio_feedback_and_cancellation_are_independent_of_window_results() {
     assert!(log.lock().unwrap().cancelled_audio_sessions.contains(&request.session));
     assert!(!log.lock().unwrap().cancelled_window_sessions.contains(&request.session));
 }
+
+#[test]
+fn window_help_cache_restores_connectors_with_displaced_labels() {
+    use crate::api::overlay::{Color, OverlayShape, LabelConnectorStyle, LabelPlacementRole, LabelStyle, OverlayLabel};
+    let (mut engine, mut backend, log) = window_test_engine(&Config::default());
+    enter_window(&mut engine, &mut backend, &log);
+    engine.overlay.window_help_override = Some(true);
+    let area = engine.help_screen().unwrap().work_area;
+    let card = Rect::new(area.center().x - 100.0, area.bottom() - 65.0, 200.0, 60.0);
+    let mut source = OverlayScene::new();
+    source.set_connector_style(LabelConnectorStyle { width: 2.0, color: Color::rgb(1, 2, 3) });
+    source.push_label(OverlayLabel::new("", card, LabelStyle::default())
+        .with_placement(1, LabelPlacementRole::Background));
+    source.push_shape(OverlayShape::label_connector(Point::new(137.0, 211.0), card.center(), Color::rgb(1, 2, 3), 2.0, 1));
+    let mut first = source.clone();
+    engine.decorate_key_help(&mut first);
+    assert_ne!(first.labels[0].rect, card);
+    assert_ne!(first.shapes, source.shapes);
+    let mut cached = source.clone();
+    engine.decorate_key_help(&mut cached);
+    assert_eq!(cached, first);
+    assert!(cached.shapes.shares_storage_with(&first.shapes));
+    // Geometry can change without replacing the label array: it must invalidate.
+    if let OverlayShape::Line { from, .. } = &mut source.shapes[0] { from.x += 47.0; }
+    let mut changed = source.clone();
+    engine.decorate_key_help(&mut changed);
+    engine.overlay.key_help_cache = None;
+    let mut rebuilt = source;
+    engine.decorate_key_help(&mut rebuilt);
+    assert_eq!(changed, rebuilt);
+    assert_ne!(changed.shapes, first.shapes);
+}

@@ -1,12 +1,14 @@
 //! Read-only help derived from the same routing decisions as real input.
 use super::*;
 use crate::api::geometry::Rect;
-use crate::api::overlay::{OverlayItems, OverlayLabel};
+use crate::api::overlay::{OverlayItems, OverlayLabel, OverlayShape};
 
 /// One visible-session cache. Source and decorated labels share the existing
 /// scene storage; there is no history or map that can grow across inputs.
 pub(super) struct KeyHelpCache {
     source_labels: OverlayItems<OverlayLabel>,
+    source_shapes: OverlayItems<OverlayShape>,
+    shapes: OverlayItems<OverlayShape>,
     annotations: Option<Arc<crate::api::overlay::WindowAnnotations>>,
     source_annotations: Option<Arc<crate::api::overlay::WindowAnnotations>>,
     labels: OverlayItems<OverlayLabel>,
@@ -229,22 +231,27 @@ impl Engine {
             && cache.ruler == ruler
             && cache.matches_screen(screen)
             && cache.source_clip == scene.clip
+            && cache.source_shapes == scene.shapes
             && cache.source_annotations == scene.window_annotations
             && (cache.source_labels.shares_storage_with(&scene.labels)
                 || (cache.source_labels.is_empty() && scene.labels.is_empty()))
         {
             scene.labels = cache.labels.clone();
+            scene.shapes = cache.shapes.clone();
             scene.window_annotations = cache.annotations.clone();
             scene.clip = cache.clip;
             return;
         }
         let (bounds, work_area, scale) = (screen.bounds, screen.work_area, screen.scale);
         let source_labels = scene.labels.clone();
+        let source_shapes = scene.shapes.clone();
         let source_annotations = scene.window_annotations.clone();
         let source_clip = scene.clip;
         self.build_key_help(scene);
         self.overlay.key_help_cache = Some(Box::new(KeyHelpCache {
             source_labels,
+            source_shapes,
+            shapes: scene.shapes.clone(),
             source_annotations,
             annotations: scene.window_annotations.clone(),
             labels: scene.labels.clone(),

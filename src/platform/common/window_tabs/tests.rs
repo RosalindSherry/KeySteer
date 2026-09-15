@@ -1612,11 +1612,8 @@ fn close_to_tray_retires_only_after_completed_inventory_and_compacts_numbers() {
 #[test]
 fn ended_ungrouped_session_releases_native_inventory_and_cached_snapshots() {
     let mut access = setup();
-    choose(&mut access, 1);
-    choose(&mut access, 2);
-    op(&mut access, TabOperation::Dissolve);
     assert!(!access.persistent());
-    assert!(!access.history.is_empty());
+    assert!(access.history.is_empty());
     assert!(!access.native.windows.is_empty());
     access.end_session();
     assert!(access.native.windows.is_empty());
@@ -1642,4 +1639,21 @@ fn ended_grouped_session_preserves_live_members_and_history() {
     assert_eq!(access.history.len(), history);
     assert_eq!(access.native.windows.len(), 4);
     access.pump(&screens(), &|| false).unwrap();
+}
+
+#[test]
+fn ended_dissolved_session_preserves_undo_and_redo() {
+    let mut access = setup();
+    choose(&mut access, 1);
+    choose(&mut access, 2);
+    let grouped = access.tab_state().unwrap().groups;
+    op(&mut access, TabOperation::Dissolve);
+    access.end_session();
+    op(&mut access, TabOperation::Undo);
+    assert_eq!(access.tab_state().unwrap().groups, grouped);
+    op(&mut access, TabOperation::Undo);
+    assert!(access.tab_state().unwrap().groups.is_empty());
+    access.end_session();
+    op(&mut access, TabOperation::Redo);
+    assert_eq!(access.tab_state().unwrap().groups, grouped);
 }

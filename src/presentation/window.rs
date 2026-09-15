@@ -716,3 +716,7 @@ border_color = "#FEDCBAFF"
         }
     }
 }
+
+// Native compact tag geometry differs on macOS; this fixture is Windows-specific.
+#[cfg(all(test, target_os = "windows"))]
+mod baseline_tests;

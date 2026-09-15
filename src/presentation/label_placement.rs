@@ -385,13 +385,13 @@ fn packed(
     Some(positions)
 }
 
-// One scene-wide style, only for enabled window identity cards.
+// Layout is finalized before touching lines; preserve baseline displacement rules.
 fn update_connectors(
     scene: &mut OverlayScene,
     annotations: &mut [Annotation],
     placements: &[Rect],
     scale: f64,
-    connector: crate::api::overlay::LabelConnectorStyle,
+    connector: Option<crate::api::overlay::LabelConnectorStyle>,
 ) {
     // annotations are ordered by group by the BTreeMap in annotations().
     // Visit existing lines once, then add only missing displaced-card lines.
@@ -403,22 +403,30 @@ fn update_connectors(
         } = shape
             && let Ok(index) = annotations.binary_search_by_key(group, |a| a.group)
         {
-            *to = placements[index].center();
+            if displaced(annotations[index].bounds, placements[index]) {
+                *to = placements[index].center();
+            }
             annotations[index].connector_present = true;
         }
     }
     for (annotation, placed) in annotations.iter().zip(placements) {
-        if !scene
+        let style = if scene
             .label_placement(annotation.primary)
-            .is_some_and(|p| p.role == Role::Background)
+            .is_some_and(|p| p.role == Role::Standalone)
         {
-            continue;
-        }
+            // Independent region/group tags had their own default connector,
+            // separate from the window.card guide-line setting.
+            Some(crate::api::overlay::LabelConnectorStyle {
+                color: scene.labels[annotation.primary].style.border_color,
+                width: 2.0,
+            })
+        } else {
+            connector
+        };
         let old = annotation.bounds;
-        let dx = placed.x - old.x;
-        let dy = placed.y - old.y;
         if !annotation.connector_present
-            && (dx.abs() + dy.abs() > 1.0 || (old.width - placed.width).abs() > 1.0)
+            && displaced(old, *placed)
+            && let Some(connector) = style
         {
             scene.push_shape(OverlayShape::label_connector(
                 old.center(),
@@ -429,6 +437,11 @@ fn update_connectors(
             ));
         }
     }
+}
+
+fn displaced(old: Rect, placed: Rect) -> bool {
+    (placed.x - old.x).abs() + (placed.y - old.y).abs() > 1.0
+        || (old.width - placed.width).abs() > 1.0
 }
 
 /// Move each registered annotation as a unit, avoiding other annotations and
@@ -474,11 +487,9 @@ pub(crate) fn avoid_overlaps(scene: &mut OverlayScene, screen: &Screen, panels: 
             }
         }
     }
-    // Dispatch once per placement pass; no per-card enabled checks.
-    if let Some(style) = scene.connector_style() {
-        update_connectors(scene, &mut annotations, &placements, scale, style);
-    }
-    for (annotation, mut placed) in annotations.into_iter().zip(placements) {
+    // Packing can return fractional tag positions. Connect to the same rounded
+    // geometry that is applied below, including on repeated avoidance passes.
+    for (annotation, placed) in annotations.iter().zip(&mut placements) {
         if scene
             .label_placement(annotation.primary)
             .is_some_and(|p| p.role == Role::Standalone)
@@ -486,6 +497,18 @@ pub(crate) fn avoid_overlaps(scene: &mut OverlayScene, screen: &Screen, panels: 
             placed.x = placed.x.round();
             placed.y = placed.y.round();
         }
+    }
+    let style = scene.connector_style();
+    if style.is_some()
+        || annotations.iter().any(|a| {
+            scene
+                .label_placement(a.primary)
+                .is_some_and(|p| p.role == Role::Standalone)
+        })
+    {
+        update_connectors(scene, &mut annotations, &placements, scale, style);
+    }
+    for (annotation, placed) in annotations.into_iter().zip(placements) {
         let old = annotation.bounds;
         let dx = placed.x - old.x;
         let dy = placed.y - old.y;
@@ -525,6 +548,51 @@ pub(crate) fn avoid_overlaps(scene: &mut OverlayScene, screen: &Screen, panels: 
 mod tests {
     use super::*;
     use crate::api::overlay::LabelStyle;
+
+    #[test]
+    fn connectors_follow_final_positions_without_changing_angle_or_stationary_endpoints() {
+        for dpi in [1.0, 1.5, 2.0] {
+            let screen = Screen {
+                name: None,
+                bounds: Rect::new(0.0, 0.0, 1920.0, 1080.0),
+                work_area: Rect::new(0.0, 0.0, 1920.0, 1040.0),
+                scale: dpi,
+                is_primary: true,
+            };
+            let card = Rect::new(400.0, 900.0, 220.0, 60.0);
+            let from = Point::new(137.0, 211.0);
+            let to = Point::new(501.0, 925.0);
+            let mut scene = OverlayScene::new();
+            scene.set_connector_style(crate::api::overlay::LabelConnectorStyle {
+                color: crate::api::overlay::Color::rgb(1, 2, 3),
+                width: 2.0,
+            });
+            scene.push_label(
+                OverlayLabel::new("", card, LabelStyle::default())
+                    .with_placement(1, Role::Background),
+            );
+            scene.push_shape(OverlayShape::label_connector(
+                from,
+                to,
+                crate::api::overlay::Color::rgb(1, 2, 3),
+                2.0,
+                1,
+            ));
+            avoid_overlaps(&mut scene, &screen, &[]);
+            assert_eq!(scene.labels[0].rect, card);
+            assert!(matches!(scene.shapes[0], OverlayShape::Line { to: end, .. } if end == to));
+            avoid_overlaps(&mut scene, &screen, &[card]);
+            let placed = scene.labels[0].rect;
+            assert_ne!(placed, card);
+            assert!(
+                matches!(scene.shapes[0], OverlayShape::Line { from: start, to: end, .. }
+                if start == from && end == placed.center())
+            );
+            let delta = placed.center();
+            assert!((delta.x - from.x).abs() > 1.0);
+            assert!(((delta.x - from.x).abs() - (delta.y - from.y).abs()).abs() > 1.0);
+        }
+    }
 
     #[test]
     fn card_guide_style_survives_avoidance_and_can_be_disabled() {
@@ -633,6 +701,10 @@ mod tests {
                     .with_z_index(group as i32),
                 );
             }
+            scene.set_connector_style(crate::api::overlay::LabelConnectorStyle {
+                width: 2.0,
+                color: style.border_color,
+            });
             // Unregistered labels are unaffected, even if they use old Window paint layers.
             scene.push_label(
                 OverlayLabel::new(
@@ -695,10 +767,7 @@ mod tests {
                         _ => None,
                     })
                     .collect();
-                assert!(
-                    ends.is_empty(),
-                    "annotations without an enabled guide style must not create lines"
-                );
+                assert_eq!(ends, [group.bounds.center()]);
             }
             scene.sort_in_place();
             let before = scene.clone();

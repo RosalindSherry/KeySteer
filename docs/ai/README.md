@@ -147,3 +147,5 @@ Window 退出后的跨平台库存回收、macOS 窗口 worker／标签栏局部
 窗口专用标注从通用 OverlayLabel 移入可选场景表、禁用引导线无样式条目与 Hint 原分配预算恢复见 [性能](07-rendering-and-performance.md) 和 [验证](08-build-docs-and-tests.md)。
 
 引导线开关在配置编译选择专用渲染入口、开启时共享场景样式与单次扫描更新见 [配置](03-configuration.md)、[性能](07-rendering-and-performance.md) 和 [验证](08-build-docs-and-tests.md)。
+
+优化前 c7bff963 场景一致性、连线与帮助缓存同步、解散组跨会话撤销保留见 [渲染](07-rendering-and-performance.md)、[后端](06-platform-backends.md) 和 [基准验证](08-build-docs-and-tests.md)。

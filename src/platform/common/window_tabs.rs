@@ -1105,8 +1105,8 @@ impl<A: WindowAccess> Grouped<A> {
     /// Release an ended mode session while preserving live native tab groups.
     pub fn end_session(&mut self) {
         self.reset();
-        if !self.persistent() {
-            // No group needs identity leases or undo snapshots between sessions.
+        if !self.persistent() && self.history.is_empty() && self.redo.is_empty() {
+            // Undo/redo may still restore a dissolved group using these identities.
             // Keep the worker alive, but release its native inventory and caches.
             self.native.reset();
             self.groups = Groups::default();
