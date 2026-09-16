@@ -181,6 +181,11 @@ pub(crate) trait WindowAccess {
     fn focused_window(&self, _windows: &[WindowInfo]) -> Option<WindowId> {
         None
     }
+    /// Hit-test without activating, assigning numbers or changing tab selection.
+    fn pointer_window(&mut self, screens: &[Screen]) -> Result<Option<WindowId>, String> {
+        let point = self.pointer()?;
+        Ok(self.acquire(point, screens)?.map(|window| window.id))
+    }
     /// Reap native audio routes; true requests a bounded maintenance wakeup.
     fn maintain_audio(&self) -> bool {
         false
@@ -1125,7 +1130,10 @@ impl Session {
                 let mut windows = self.enumerate(access, screens, cancelled)?;
                 if standalone {
                     windows.retain(|window| !window.minimized);
-                    self.target = access.focused_window(&windows);
+                    self.target = access
+                        .pointer_window(screens)?
+                        .filter(|id| windows.iter().any(|w| w.id == *id))
+                        .or_else(|| access.focused_window(&windows));
                 } else {
                     result.windows = Some(windows.clone());
                 }
@@ -1145,38 +1153,22 @@ impl Session {
                     return Err("No ordinary windows available".into());
                 }
                 let tabs = access.tab_state();
-                let grouped = tabs.as_ref().and_then(|state| {
+                let grouped = tabs.as_ref().filter(|_| !standalone).and_then(|state| {
                     let group = state.containing(self.target?)?;
                     Some((group.active, group.members.clone()))
                 });
-                let mut application = Vec::new();
-                if grouped.is_none()
-                    && let Some(key) = windows
-                        .iter()
-                        .find(|window| Some(window.id) == self.target)
-                        .and_then(super::window_tabs::application_group_key)
-                {
-                    // Keep the existing ring order despite activation changing Z-order.
-                    // Other established groups stay intact, just as in auto-grouping.
-                    application.extend(self.cycle.iter().copied().filter(|id| {
-                        !tabs
-                            .as_ref()
-                            .is_some_and(|state| state.containing(*id).is_some())
-                            && windows.iter().any(|window| {
-                                window.id == *id
-                                    && super::window_tabs::application_group_key(window)
-                                        == Some(key)
-                            })
-                    }));
-                }
-                let fallback = if application.len() > 1 {
-                    application.as_slice()
+                let application = if grouped.is_none() {
+                    super::window_tabs::application_cycle_order(
+                        &self.cycle,
+                        &windows,
+                        tabs.as_ref(),
+                    )
                 } else {
-                    self.cycle.as_slice()
+                    Vec::new()
                 };
                 let cycle = grouped
                     .as_ref()
-                    .map_or(fallback, |(_, members)| members.as_slice());
+                    .map_or(application.as_slice(), |(_, members)| members.as_slice());
                 let current = grouped.as_ref().map(|(active, _)| *active).or(self.target);
                 let start = current
                     .and_then(|id| cycle.iter().position(|v| *v == id))
@@ -1942,6 +1934,7 @@ mod tests {
         partial: bool,
         refuse_focus: bool,
         selected: std::cell::Cell<Option<WindowId>>,
+        pointer_target: Option<WindowId>,
         close_requests: std::cell::RefCell<Vec<WindowId>>,
         volume_requests: std::cell::RefCell<Vec<(WindowId, crate::api::audio::AudioAction)>>,
         unchanged_ack: bool,
@@ -2001,6 +1994,7 @@ mod tests {
                 partial: false,
                 refuse_focus: false,
                 selected: std::cell::Cell::new(None),
+                pointer_target: None,
                 close_requests: Default::default(),
                 volume_requests: Default::default(),
                 unchanged_ack: false,
@@ -2013,6 +2007,9 @@ mod tests {
     }
 
     impl WindowAccess for Fake {
+        fn pointer_window(&mut self, _: &[Screen]) -> Result<Option<WindowId>, String> {
+            Ok(self.pointer_target)
+        }
         fn focused_window(&self, _windows: &[WindowInfo]) -> Option<WindowId> {
             self.selected.get()
         }
@@ -3162,7 +3159,18 @@ mod tests {
                 ..Session::default()
             };
             access.selected.set(Some(WindowId(1)));
-            for (backwards, expected) in [(false, 3), (false, 1), (true, 3)] {
+            for (backwards, expected) in [
+                (false, 3),
+                (false, 2),
+                (false, 4),
+                (false, 5),
+                (false, 1),
+                (true, 5),
+                (true, 4),
+                (true, 2),
+                (true, 3),
+                (true, 1),
+            ] {
                 let operation = if standalone {
                     WindowOperation::CycleActive { backwards }
                 } else if backwards {
@@ -3187,7 +3195,7 @@ mod tests {
             };
             assert_eq!(
                 run(&mut session, &mut access, operation).target.unwrap().id,
-                WindowId(3)
+                WindowId(4)
             );
         }
     }
@@ -3226,6 +3234,35 @@ mod tests {
             WindowOperation::CycleActive { backwards: false },
         );
         assert_eq!(result.target.unwrap().id, WindowId(1));
+    }
+
+    #[test]
+    fn standalone_cycle_starts_at_pointer_instead_of_foreground_and_leaves_peers() {
+        let mut access = Fake::new(4);
+        access.windows.get_mut(&WindowId(2)).unwrap().info.app = "other".into();
+        access.windows.get_mut(&WindowId(4)).unwrap().info.app = "other".into();
+        access.selected.set(Some(WindowId(2)));
+        access.pointer_target = Some(WindowId(1));
+        let mut session = Session::default();
+        for expected in [3, 2, 4, 1] {
+            let result = run(
+                &mut session,
+                &mut access,
+                WindowOperation::CycleActive { backwards: false },
+            );
+            assert_eq!(result.target.unwrap().id, WindowId(expected));
+            // Simulate the successful pointer warp to the selected window.
+            access.pointer_target = Some(WindowId(expected));
+        }
+        for expected in [4, 2, 3, 1] {
+            let result = run(
+                &mut session,
+                &mut access,
+                WindowOperation::CycleActive { backwards: true },
+            );
+            assert_eq!(result.target.unwrap().id, WindowId(expected));
+            access.pointer_target = Some(WindowId(expected));
+        }
     }
 
     #[test]

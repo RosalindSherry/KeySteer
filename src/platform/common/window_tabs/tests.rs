@@ -146,8 +146,35 @@ fn window_tab_cycle_stays_in_current_group_and_digits_can_leave() {
             .target
             .unwrap()
             .id,
-        WindowId(3)
+        WindowId(4)
     );
+}
+
+#[test]
+fn standalone_cycle_can_leave_an_actual_tab_group_in_both_directions() {
+    use crate::api::window::WindowOperation as O;
+    use crate::platform::common::window_session::WindowSessionProbe;
+    let mut access = setup();
+    choose(&mut access, 1);
+    choose(&mut access, 3);
+    access
+        .activate_tab(WindowId(1), &screens(), &|| false)
+        .unwrap();
+    let mut session = WindowSessionProbe::new(WindowId(1));
+    for (backwards, expected) in [
+        (false, 3),
+        (false, 2),
+        (false, 4),
+        (false, 1),
+        (true, 4),
+        (true, 2),
+        (true, 3),
+        (true, 1),
+    ] {
+        let result = session.execute(&mut access, O::CycleActive { backwards }, &screens());
+        assert_eq!(result.target.unwrap().id, WindowId(expected));
+        assert!(result.windows.is_none() && result.tabs.is_none());
+    }
 }
 
 #[test]
@@ -414,6 +441,9 @@ fn setup() -> Grouped<Fake> {
     grouped
 }
 impl WindowAccess for Fake {
+    fn pointer_window(&mut self, _: &[Screen]) -> Result<Option<WindowId>, String> {
+        Ok(self.focus.get())
+    }
     fn tab_bar_height(&self, screen: &Screen) -> f64 {
         self.header * screen.scale
     }

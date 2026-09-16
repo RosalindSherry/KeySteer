@@ -59,7 +59,7 @@ pub enum Command {
     WindowPresets(Box<super::window_presets::PresetLibraryRequest>),
     /// Move the window and physical pointer together, preserving relative position.
     MoveWindowToScreen(WindowScreenTarget),
-    /// Cycle from the foreground window without entering a mode or showing UI.
+    /// Cycle from the pointer window (foreground fallback) without showing mode UI.
     CycleWindow {
         backwards: bool,
     },

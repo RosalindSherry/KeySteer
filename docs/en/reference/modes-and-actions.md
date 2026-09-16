@@ -230,12 +230,13 @@ Explicit `call` is useful for a no-argument invocation or to avoid ambiguity. An
 
 ## Switch the active window
 
-`window_activate_next` / `window_activate_previous` cycle from the foreground window,
-activate the destination, and center the pointer on it. A grouped window cycles within
-its tab group. Ungrouped windows prefer other ungrouped windows of the same application
-on the same display, using Tabs' automatic grouping identity. With no such peer, cycling
-falls back to ordinary windows across displays, excluding minimized windows.
-Window's Tab / Shift+Tab uses the same priority. These built-in verbs reuse Window's stable ordering without entering
+`window_activate_next` / `window_activate_previous` cycle from the window under the pointer,
+falling back to the foreground window when no candidate is under it. They activate the destination
+and center the pointer on it. The ring includes every ordinary candidate, excluding minimized windows.
+Tab members stay adjacent in tab order; ungrouped windows of the same application and display
+stay adjacent too. Cycling continues into other applications after passing those peers, in either direction.
+For example, A1, B1, A2, B2 becomes A1 → A2 → B1 → B2. Window mode retains its existing
+within-tab-group behavior; these Normal actions can leave tab groups. They reuse the selection logic without entering
 Window mode or showing titles, numbers, or controls. There are no new default shortcuts:
 
 ```toml

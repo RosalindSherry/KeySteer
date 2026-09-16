@@ -17,6 +17,45 @@ pub(super) fn application_group_key(window: &WindowInfo) -> Option<(usize, &str)
     (!window.app.is_empty()).then_some((window.screen, window.app.as_str()))
 }
 
+/// Keep every candidate, placing peers next to each other in the stable ring.
+/// Do not rotate around the latest target: doing so would trap repeated moves
+/// in that target's application after every pointer warp.
+pub(super) fn application_cycle_order(
+    ring: &[WindowId],
+    windows: &[WindowInfo],
+    tabs: Option<&TabState>,
+) -> Vec<WindowId> {
+    let mut ordered = Vec::with_capacity(ring.len());
+    for id in ring {
+        if ordered.contains(id) {
+            continue;
+        }
+        if let Some(group) = tabs.and_then(|state| state.containing(*id)) {
+            ordered.extend(
+                group
+                    .members
+                    .iter()
+                    .copied()
+                    .filter(|member| ring.contains(member)),
+            );
+        } else if let Some(key) = windows
+            .iter()
+            .find(|w| w.id == *id)
+            .and_then(application_group_key)
+        {
+            ordered.extend(ring.iter().copied().filter(|candidate| {
+                !tabs.is_some_and(|state| state.containing(*candidate).is_some())
+                    && windows
+                        .iter()
+                        .any(|w| w.id == *candidate && application_group_key(w) == Some(key))
+            }));
+        } else {
+            ordered.push(*id);
+        }
+    }
+    ordered
+}
+
 #[derive(Clone)]
 struct Checkpoint {
     groups: Groups,
@@ -1200,6 +1239,9 @@ impl<A: WindowAccess> WindowAccess for Grouped<A> {
     }
     fn focused_window(&self, windows: &[WindowInfo]) -> Option<WindowId> {
         self.native.focused_window(windows)
+    }
+    fn pointer_window(&mut self, screens: &[Screen]) -> Result<Option<WindowId>, String> {
+        self.native.pointer_window(screens)
     }
     fn enumerate(
         &mut self,

@@ -180,7 +180,7 @@ pub enum Binding {
     KeyHelp,
     /// An operation handled by the built-in Window mode.
     Window(super::window::WindowAction),
-    /// Activate a neighbouring foreground window without entering Window mode.
+    /// Activate a neighbouring window from the pointer without entering Window mode.
     ActivateWindow { backwards: bool },
     /// Stop the program.
     Quit,
