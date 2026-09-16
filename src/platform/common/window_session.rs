@@ -85,9 +85,6 @@ pub(crate) trait WindowAccess {
         }
         Ok(())
     }
-    fn tab_application(&self, id: WindowId, screens: &[Screen]) -> Result<String, String> {
-        Ok(self.snapshot(id, screens)?.info.app)
-    }
     fn tab_events(&mut self) -> Vec<crate::api::window_tabs::TabNativeEvent> {
         Vec::new()
     }
@@ -1139,7 +1136,7 @@ impl Session {
                 // existing ring so successive Tabs visit every window instead
                 // of oscillating between the two most recently activated ones.
                 self.cycle.retain(|id| windows.iter().any(|w| w.id == *id));
-                for window in windows {
+                for window in &windows {
                     if !self.cycle.contains(&window.id) {
                         self.cycle.push(window.id);
                     }
@@ -1147,13 +1144,39 @@ impl Session {
                 if self.cycle.is_empty() {
                     return Err("No ordinary windows available".into());
                 }
-                let grouped = access.tab_state().and_then(|state| {
+                let tabs = access.tab_state();
+                let grouped = tabs.as_ref().and_then(|state| {
                     let group = state.containing(self.target?)?;
                     Some((group.active, group.members.clone()))
                 });
+                let mut application = Vec::new();
+                if grouped.is_none()
+                    && let Some(key) = windows
+                        .iter()
+                        .find(|window| Some(window.id) == self.target)
+                        .and_then(super::window_tabs::application_group_key)
+                {
+                    // Keep the existing ring order despite activation changing Z-order.
+                    // Other established groups stay intact, just as in auto-grouping.
+                    application.extend(self.cycle.iter().copied().filter(|id| {
+                        !tabs
+                            .as_ref()
+                            .is_some_and(|state| state.containing(*id).is_some())
+                            && windows.iter().any(|window| {
+                                window.id == *id
+                                    && super::window_tabs::application_group_key(window)
+                                        == Some(key)
+                            })
+                    }));
+                }
+                let fallback = if application.len() > 1 {
+                    application.as_slice()
+                } else {
+                    self.cycle.as_slice()
+                };
                 let cycle = grouped
                     .as_ref()
-                    .map_or(self.cycle.as_slice(), |(_, members)| members.as_slice());
+                    .map_or(fallback, |(_, members)| members.as_slice());
                 let current = grouped.as_ref().map(|(active, _)| *active).or(self.target);
                 let start = current
                     .and_then(|id| cycle.iter().position(|v| *v == id))
@@ -3118,6 +3141,54 @@ mod tests {
                 Some(access.windows[&expected].info.bounds.center())
             );
             assert_eq!(result.message.as_deref(), Some("focus denied"));
+        }
+    }
+
+    #[test]
+    fn cycling_prefers_same_application_and_screen_then_falls_back() {
+        for standalone in [false, true] {
+            let mut access = Fake::new(5);
+            access.windows.get_mut(&WindowId(2)).unwrap().info.app = "other".into();
+            access
+                .windows
+                .get_mut(&WindowId(4))
+                .unwrap()
+                .info
+                .app
+                .clear();
+            access.windows.get_mut(&WindowId(5)).unwrap().info.screen = 1;
+            let mut session = Session {
+                target: Some(WindowId(1)),
+                ..Session::default()
+            };
+            access.selected.set(Some(WindowId(1)));
+            for (backwards, expected) in [(false, 3), (false, 1), (true, 3)] {
+                let operation = if standalone {
+                    WindowOperation::CycleActive { backwards }
+                } else if backwards {
+                    WindowOperation::CyclePrevious
+                } else {
+                    WindowOperation::Cycle
+                };
+                let result = run(&mut session, &mut access, operation);
+                assert_eq!(result.target.unwrap().id, WindowId(expected));
+                assert_eq!(
+                    result.pointer,
+                    Some(access.windows[&WindowId(expected)].info.bounds.center())
+                );
+            }
+            // A singleton application can still switch to another application.
+            session.target = Some(WindowId(2));
+            access.selected.set(Some(WindowId(2)));
+            let operation = if standalone {
+                WindowOperation::CycleActive { backwards: false }
+            } else {
+                WindowOperation::Cycle
+            };
+            assert_eq!(
+                run(&mut session, &mut access, operation).target.unwrap().id,
+                WindowId(3)
+            );
         }
     }
 

@@ -4,7 +4,7 @@ Window 入口激活鼠标下窗口、可配置关闭动作见 [公共 API](02-ru
 
 # KeySteer 项目手册
 
-Normal 独立切换窗口的内置动作 `window_activate_next` / `window_activate_previous` 及共享后台循环逻辑见 [运行时/API](02-runtime-and-api.md) 和 [原生后端](06-platform-backends.md)。
+Normal 独立切换窗口的内置动作 `window_activate_next` / `window_activate_previous`、标签组优先与同程序归组规则复用见 [运行时/API](02-runtime-and-api.md) 和 [原生后端](06-platform-backends.md)。
 
 首页下载版本及资产链接在每次文档构建时从 GitHub 最新正式 Release 注入，见 [构建与文档站](08-build-docs-and-tests.md)。
 

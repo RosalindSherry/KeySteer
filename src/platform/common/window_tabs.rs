@@ -11,6 +11,12 @@ use crate::api::window_tabs::{
 };
 use crate::api::{Point, Rect, Screen};
 
+/// Shared identity for automatic tabs and ungrouped application cycling.
+/// Borrow the refreshed inventory instead of querying native metadata again.
+pub(super) fn application_group_key(window: &WindowInfo) -> Option<(usize, &str)> {
+    (!window.app.is_empty()).then_some((window.screen, window.app.as_str()))
+}
+
 #[derive(Clone)]
 struct Checkpoint {
     groups: Groups,
@@ -654,7 +660,7 @@ impl<A: WindowAccess> Grouped<A> {
                 });
                 self.groups.state.target = None;
                 let windows = self.enumerate(screens, cancelled)?;
-                let mut apps: BTreeMap<String, Vec<WindowId>> = BTreeMap::new();
+                let mut apps: BTreeMap<(usize, &str), Vec<WindowId>> = BTreeMap::new();
                 for window in crate::api::window::application_number_order(
                     &windows,
                     self.groups.state.numbers.iter().copied(),
@@ -666,12 +672,9 @@ impl<A: WindowAccess> Grouped<A> {
                     {
                         continue;
                     }
-                    let app = self.native.tab_application(window.id, screens)?;
-                    if !app.is_empty() {
+                    if let Some(key) = application_group_key(window) {
                         // Keep automatic groups on their original display.
-                        apps.entry(format!("{}:{app}", window.screen))
-                            .or_default()
-                            .push(window.id);
+                        apps.entry(key).or_default().push(window.id);
                     }
                 }
                 let ids: Vec<_> = apps

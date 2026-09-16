@@ -151,6 +151,73 @@ fn window_tab_cycle_stays_in_current_group_and_digits_can_leave() {
 }
 
 #[test]
+fn cycling_uses_auto_group_identity_but_existing_tabs_take_priority() {
+    use crate::api::window::WindowOperation as O;
+    use crate::platform::common::window_session::WindowSessionProbe;
+    let mut access = setup();
+    for id in [1, 3, 4] {
+        access
+            .native
+            .windows
+            .get_mut(&WindowId(id))
+            .unwrap()
+            .info
+            .app = "editor".into();
+    }
+    let mut session = WindowSessionProbe::new(WindowId(1));
+    assert_eq!(
+        session
+            .execute(&mut access, O::Cycle, &screens())
+            .target
+            .unwrap()
+            .id,
+        WindowId(3)
+    );
+    assert_eq!(
+        session
+            .execute(&mut access, O::CyclePrevious, &screens())
+            .target
+            .unwrap()
+            .id,
+        WindowId(1)
+    );
+    // A manually merged group may contain different apps; its order wins.
+    choose(&mut access, 1);
+    choose(&mut access, 2);
+    assert_eq!(
+        session
+            .execute(&mut access, O::Cycle, &screens())
+            .target
+            .unwrap()
+            .id,
+        WindowId(1)
+    );
+    assert_eq!(
+        session
+            .execute(&mut access, O::Cycle, &screens())
+            .target
+            .unwrap()
+            .id,
+        WindowId(2)
+    );
+    session.execute(&mut access, O::Select(WindowId(3)), &screens());
+    // Ungrouped application cycling does not enter that established group.
+    assert_eq!(
+        session
+            .execute(&mut access, O::Cycle, &screens())
+            .target
+            .unwrap()
+            .id,
+        WindowId(4)
+    );
+    op(&mut access, TabOperation::Enter { screen: 0 });
+    assert_eq!(
+        access.groups.state.containing(WindowId(3)).unwrap().members,
+        [WindowId(3), WindowId(4)]
+    );
+}
+
+#[test]
 fn first_numbers_batch_applications_without_renumbering_existing_windows() {
     let mut access = setup();
     access.groups = Groups::default();

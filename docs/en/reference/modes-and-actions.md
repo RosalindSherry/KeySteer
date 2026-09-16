@@ -232,8 +232,10 @@ Explicit `call` is useful for a no-argument invocation or to avoid ambiguity. An
 
 `window_activate_next` / `window_activate_previous` cycle from the foreground window,
 activate the destination, and center the pointer on it. A grouped window cycles within
-its tab group; otherwise cycling uses ordinary windows across displays, excluding
-minimized windows. These built-in verbs reuse Window's stable ordering without entering
+its tab group. Ungrouped windows prefer other ungrouped windows of the same application
+on the same display, using Tabs' automatic grouping identity. With no such peer, cycling
+falls back to ordinary windows across displays, excluding minimized windows.
+Window's Tab / Shift+Tab uses the same priority. These built-in verbs reuse Window's stable ordering without entering
 Window mode or showing titles, numbers, or controls. There are no new default shortcuts:
 
 ```toml

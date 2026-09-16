@@ -2,6 +2,8 @@
 
 独立 `CycleActive` 请求由现有 window worker 异步处理，复用 `Cycle` / `CyclePrevious`
 的稳定环与组内优先选择。独立环不占用编辑会话，每次枚举后读取系统前台身份，而非鼠标命中或旧目标。
+所有前后切换共用优先级：已有标签组 > 同屏同程序的未合并窗口（至少两个）> 全部候选稳定环。
+`window_tabs::application_group_key` 复用库存的程序标识与屏幕，供自动归组和切换共同使用；不重复查询原生程序元数据，也不临时创建标签组。
 Windows 从 foreground HWND 匹配稳定 WindowId；macOS 复用 AXFocusedWindow 查询。
 请求不回传 UI 库存、不复制结果标签状态、不消费编辑会话的关闭通知；成功后只发中心点，激活失败不移动鼠标。
 
