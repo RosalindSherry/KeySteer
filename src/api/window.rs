@@ -266,6 +266,10 @@ pub enum WindowChange {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum WindowOperation {
+    /// Scan for overlapping peers, preferring tabs; no match leaves focus unchanged.
+    CycleOverlapping {
+        backwards: bool,
+    },
     /// Standalone focus cycling; session/id are unused and no WindowResult is emitted.
     CycleActive {
         backwards: bool,
@@ -330,6 +334,12 @@ pub struct WindowScreenLayout {
 }
 
 impl WindowOperation {
+    pub(crate) fn is_standalone_cycle(&self) -> bool {
+        matches!(
+            self,
+            Self::CycleActive { .. } | Self::CycleOverlapping { .. }
+        )
+    }
     pub fn precedes_inventory(&self) -> bool {
         matches!(
             self,

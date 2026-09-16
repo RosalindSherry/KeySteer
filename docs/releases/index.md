@@ -1,5 +1,11 @@
 # 更新日志 / Release Notes
 
+## 0.10.15
+
+- 新增可配置的 `window_overlap_next` / `window_overlap_previous`，可在 Normal 模式中只切换到与当前窗口有重叠的窗口，并将鼠标移到目标窗口中心。
+
+- Added configurable `window_overlap_next` / `window_overlap_previous` actions to switch between overlapping windows from Normal mode and center the pointer on the selected window.
+
 ## 0.10.12
 
 - 新增可配置的 `window_activate_next` / `window_activate_previous` 动作，可在 Normal 模式中直接切换前后窗口并将鼠标移到目标窗口中心，无需进入 Window 模式。

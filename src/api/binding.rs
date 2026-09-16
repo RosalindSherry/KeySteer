@@ -132,11 +132,17 @@ pub enum Binding {
     Mode(ModeId),
     /// Invoke a verb exported by a plugin without coupling configuration to
     /// that plugin's concrete Rust type.
-    Invoke { verb: String, args: Vec<String> },
+    Invoke {
+        verb: String,
+        args: Vec<String>,
+    },
     /// Move the pointer continuously while held.
     Move(Direction),
     /// Move the pointer to an absolute screen coordinate.
-    Warp { x: i32, y: i32 },
+    Warp {
+        x: i32,
+        y: i32,
+    },
     /// Scroll while held.
     Scroll(Direction, ScrollAmount),
     /// Click a button.
@@ -153,7 +159,10 @@ pub enum Binding {
     /// state, while a bare activation releases all latched inputs.
     Toggle(Vec<InputTarget>),
     /// Pause an action sequence without blocking the input event loop.
-    Wait { min_ms: u64, max_ms: u64 },
+    Wait {
+        min_ms: u64,
+        max_ms: u64,
+    },
     /// Scale pointer speed while held.
     Speed(Speed),
     /// Toggle a pointer speed modifier on each key press.
@@ -163,7 +172,10 @@ pub enum Binding {
     /// Send a synthetic keystroke to the focused application.
     Send(KeyChord),
     /// Run a command.
-    Exec { program: String, args: Vec<String> },
+    Exec {
+        program: String,
+        args: Vec<String>,
+    },
     /// Request a fresh UI hint scan.
     RescanUi,
     /// Complete the current targeting session without re-entering its mode.
@@ -173,7 +185,10 @@ pub enum Binding {
     /// Re-read the configuration from disk.
     ReloadConfig,
     /// Persist a TOML value at a dotted configuration path.
-    SetConfig { path: String, value: String },
+    SetConfig {
+        path: String,
+        value: String,
+    },
     /// Leave the current mode and return to idle.
     Escape,
     /// Toggle the available-key panel.
@@ -181,7 +196,12 @@ pub enum Binding {
     /// An operation handled by the built-in Window mode.
     Window(super::window::WindowAction),
     /// Activate a neighbouring window from the pointer without entering Window mode.
-    ActivateWindow { backwards: bool },
+    ActivateWindow {
+        backwards: bool,
+    },
+    ActivateOverlappingWindow {
+        backwards: bool,
+    },
     /// Stop the program.
     Quit,
     /// Explicitly unbound: removes an inherited default.
@@ -372,6 +392,9 @@ impl Binding {
         use ScrollAmount::{Full, Half, Step};
 
         Some(match word {
+            "window_overlap_next" | "window_overlap_previous" => B::ActivateOverlappingWindow {
+                backwards: word == "window_overlap_previous",
+            },
             "window_activate_next" | "window_activate_previous" => B::ActivateWindow {
                 backwards: word == "window_activate_previous",
             },
@@ -471,6 +494,12 @@ impl Binding {
         };
         match self {
             B::Window(action) => action.name().into(),
+            B::ActivateOverlappingWindow { backwards } => if *backwards {
+                "window_overlap_previous"
+            } else {
+                "window_overlap_next"
+            }
+            .into(),
             B::ActivateWindow { backwards } => if *backwards {
                 "window_activate_previous"
             } else {

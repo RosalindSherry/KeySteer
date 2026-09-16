@@ -7,6 +7,43 @@ fn chord_test_engine(config: &Config) -> Engine {
 }
 
 #[test]
+fn overlapping_window_verbs_are_compiled_host_actions_without_window_ui() {
+    let config = Config::parse(
+        r#"
+        [normal.bindings]
+        x = "window_overlap_next"
+        c = "window_overlap_previous"
+    "#,
+    )
+    .unwrap();
+    let mut engine = chord_test_engine(&config);
+    let (mut backend, log) = FakeBackend::new(vec![]);
+    engine.screens = backend.screens().unwrap();
+    engine.set_active(ModeId::normal());
+    engine.rebuild_tables();
+    let presents = log.lock().unwrap().presents;
+    for (key, backwards) in [("x", false), ("c", true)] {
+        engine
+            .handle_backend_event(key_down(key), &mut backend)
+            .unwrap();
+        engine
+            .handle_backend_event(key_up(key), &mut backend)
+            .unwrap();
+        assert_eq!(engine.active_mode(), &ModeId::normal());
+        assert!(engine.scheduler.window_sessions.is_empty());
+        let log = log.lock().unwrap();
+        assert_eq!(
+            log.window_requests.last().unwrap().operation,
+            crate::api::window::WindowOperation::CycleOverlapping { backwards }
+        );
+        assert_eq!(log.presents, presents);
+    }
+    for verb in ["window_overlap_next", "window_overlap_previous"] {
+        assert_eq!(Binding::parse(verb).unwrap().canonical(), verb);
+    }
+}
+
+#[test]
 fn standalone_window_verbs_keep_normal_without_window_ui_or_sessions() {
     let config = Config::parse(
         r#"

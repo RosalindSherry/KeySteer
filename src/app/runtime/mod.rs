@@ -1674,12 +1674,18 @@ impl Engine {
                         self.execute_for(owner, [Command::warp_to(pointer)], backend)?;
                     }
                 }
-                Command::CycleWindow { backwards } => {
+                Command::CycleWindow { backwards }
+                | Command::CycleOverlappingWindow { backwards } => {
+                    let operation = if matches!(command, Command::CycleOverlappingWindow { .. }) {
+                        crate::api::window::WindowOperation::CycleOverlapping { backwards }
+                    } else {
+                        crate::api::window::WindowOperation::CycleActive { backwards }
+                    };
                     backend.request_window(crate::api::window::WindowRequest {
                         scope: None,
                         session: 0,
                         id: 0,
-                        operation: crate::api::window::WindowOperation::CycleActive { backwards },
+                        operation,
                     })?;
                 }
             }
@@ -1871,15 +1877,19 @@ impl Engine {
         }
 
         match binding {
-            Binding::ActivateWindow { backwards } => {
+            Binding::ActivateWindow { backwards }
+            | Binding::ActivateOverlappingWindow { backwards } => {
                 let owner = self.registry.active.clone();
-                self.execute_for(
-                    &owner,
-                    [Command::CycleWindow {
+                let command = if matches!(binding, Binding::ActivateOverlappingWindow { .. }) {
+                    Command::CycleOverlappingWindow {
                         backwards: *backwards,
-                    }],
-                    backend,
-                )?;
+                    }
+                } else {
+                    Command::CycleWindow {
+                        backwards: *backwards,
+                    }
+                };
+                self.execute_for(&owner, [command], backend)?;
                 Ok(true)
             }
             Binding::KeyHelp => {

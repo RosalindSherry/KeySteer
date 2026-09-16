@@ -242,6 +242,17 @@ x = "window_activate_next"
 c = "window_activate_previous"
 ```
 
+## 相交窗口切换
+
+`window_overlap_next` / `window_overlap_previous` 复用上述切换逻辑，只选择与当前鼠标下窗口有重叠面积的窗口（仅边缘接触不算）。鼠标下无有效窗口时使用前台窗口。已有 Tabs 组时优先按标签顺序检查组内候选，再检查全局其他窗口；逐个跳过不相交候选，遍历完整列表仍无匹配时不操作，不切换到不相交窗口。
+每一步都按当前窗口几何检查相交，不固定首次选择的窗口集合。激活成功后鼠标移到中心，不进入 Window 模式、不显示窗口标识。
+
+```toml
+[normal.bindings]
+x = "window_overlap_next"
+c = "window_overlap_previous"
+```
+
 ## 跨屏移动窗口
 
 内置 Window Mover 插件提供 `move_window next`、`move_window previous`（或 `prev`）和

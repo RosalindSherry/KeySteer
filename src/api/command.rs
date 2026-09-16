@@ -63,6 +63,9 @@ pub enum Command {
     CycleWindow {
         backwards: bool,
     },
+    CycleOverlappingWindow {
+        backwards: bool,
+    },
     /// Dispatch high-level actions through the same path used by config.
     DispatchActions(ActionSequence),
     /// Move the pointer by a relative delta, in pixels.

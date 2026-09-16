@@ -245,6 +245,22 @@ x = "window_activate_next"
 c = "window_activate_previous"
 ```
 
+## Cycle overlapping windows
+
+`window_overlap_next` / `window_overlap_previous` prefer windows with positive-area overlap
+with the window under the pointer (foreground fallback). Touching edges do not count.
+Existing Tabs groups take priority in their tab order, followed by the remaining global candidates.
+Non-overlapping candidates are skipped in the requested direction. If the entire ring has no
+overlapping peer, focus and pointer remain unchanged; there is no disjoint-window fallback.
+Overlap is checked against the current window on each step, rather than fixing an initial set.
+The pointer follows the activated window's center; no Window mode or window labels appear.
+
+```toml
+[normal.bindings]
+x = "window_overlap_next"
+c = "window_overlap_previous"
+```
+
 ## Move a window between displays
 
 The bundled Window Mover plugin exports `move_window next`, `move_window previous` (or `prev`), and numbered destinations such as `move_window 2`.
