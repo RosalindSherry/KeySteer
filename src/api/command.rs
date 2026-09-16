@@ -63,6 +63,10 @@ pub enum Command {
     CycleWindow {
         backwards: bool,
     },
+    /// Cycle within windows which share a fixed pointer anchor.
+    CycleWindowStack {
+        backwards: bool,
+    },
     /// Dispatch high-level actions through the same path used by config.
     DispatchActions(ActionSequence),
     /// Move the pointer by a relative delta, in pixels.

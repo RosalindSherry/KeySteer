@@ -421,7 +421,11 @@ impl WindowWorker {
                             }
                             Pending::Window { request, screens } => (request, screens),
                         };
-                        if matches!(request.operation, WindowOperation::CycleActive { .. }) {
+                        if matches!(
+                            request.operation,
+                            WindowOperation::CycleActive { .. }
+                                | WindowOperation::CycleActiveStack { .. }
+                        ) {
                             let cancelled = || input.stop.load(Ordering::Acquire);
                             displays.clone_from(&screens);
                             let result =
@@ -503,7 +507,10 @@ impl WindowWorker {
             .queue
             .lock()
             .map_err(|_| "window queue poisoned")?;
-        if matches!(request.operation, WindowOperation::CycleActive { .. }) {
+        if matches!(
+            request.operation,
+            WindowOperation::CycleActive { .. } | WindowOperation::CycleActiveStack { .. }
+        ) {
             if queue.len() >= 64 {
                 return Err("window operation queue is full".into());
             }
@@ -762,6 +769,40 @@ struct EditTransaction {
     minimums: Vec<(WindowId, Point)>,
 }
 
+const STACK_MIN_OVERLAP: f64 = 20.0;
+
+fn stack_windows_overlap(a: Rect, b: Rect) -> bool {
+    let width = a.right().min(b.right()) - a.left().max(b.left());
+    let height = a.bottom().min(b.bottom()) - a.top().max(b.top());
+    width >= STACK_MIN_OVERLAP && height >= STACK_MIN_OVERLAP
+}
+
+fn connected_overlap_group(windows: Vec<WindowInfo>, target: WindowId) -> Vec<WindowInfo> {
+    let Some(start) = windows.iter().position(|window| window.id == target) else {
+        return Vec::new();
+    };
+    let mut selected = vec![false; windows.len()];
+    let mut queue = VecDeque::from([start]);
+    selected[start] = true;
+
+    while let Some(index) = queue.pop_front() {
+        for candidate in 0..windows.len() {
+            if !selected[candidate]
+                && stack_windows_overlap(windows[index].bounds, windows[candidate].bounds)
+            {
+                selected[candidate] = true;
+                queue.push_back(candidate);
+            }
+        }
+    }
+
+    windows
+        .into_iter()
+        .zip(selected)
+        .filter_map(|(window, included)| included.then_some(window))
+        .collect()
+}
+
 fn rect_matches(a: Rect, b: Rect) -> bool {
     (a.x - b.x).abs() <= 1.5
         && (a.y - b.y).abs() <= 1.5
@@ -988,7 +1029,10 @@ impl Session {
             WindowOperation::BeginEdit { transaction, .. } => Some(*transaction),
             _ => None,
         };
-        let standalone = matches!(request.operation, WindowOperation::CycleActive { .. });
+        let standalone = matches!(
+            request.operation,
+            WindowOperation::CycleActive { .. } | WindowOperation::CycleActiveStack { .. }
+        );
         let outcome = self.apply(access, request.operation, screens, cancelled, &mut result);
         if standalone {
             if let Err(error) = outcome {
@@ -1120,12 +1164,18 @@ impl Session {
             }
             WindowOperation::Cycle
             | WindowOperation::CyclePrevious
-            | WindowOperation::CycleActive { .. } => {
-                let standalone = matches!(operation, WindowOperation::CycleActive { .. });
+            | WindowOperation::CycleActive { .. }
+            | WindowOperation::CycleActiveStack { .. } => {
+                let standalone = matches!(
+                    operation,
+                    WindowOperation::CycleActive { .. } | WindowOperation::CycleActiveStack { .. }
+                );
+                let stacked = matches!(operation, WindowOperation::CycleActiveStack { .. });
                 let backwards = matches!(
                     operation,
                     WindowOperation::CyclePrevious
                         | WindowOperation::CycleActive { backwards: true }
+                        | WindowOperation::CycleActiveStack { backwards: true }
                 );
                 let mut windows = self.enumerate(access, screens, cancelled)?;
                 if standalone {
@@ -1134,6 +1184,9 @@ impl Session {
                         .pointer_window(screens)?
                         .filter(|id| windows.iter().any(|w| w.id == *id))
                         .or_else(|| access.focused_window(&windows));
+                    if stacked && let Some(target) = self.target {
+                        windows = connected_overlap_group(windows, target);
+                    }
                 } else {
                     result.windows = Some(windows.clone());
                 }
@@ -1157,7 +1210,9 @@ impl Session {
                     let group = state.containing(self.target?)?;
                     Some((group.active, group.members.clone()))
                 });
-                let application = if grouped.is_none() {
+                let application = if stacked {
+                    Vec::new()
+                } else if grouped.is_none() {
                     super::window_tabs::application_cycle_order(
                         &self.cycle,
                         &windows,
@@ -1166,9 +1221,13 @@ impl Session {
                 } else {
                     Vec::new()
                 };
-                let cycle = grouped
-                    .as_ref()
-                    .map_or(application.as_slice(), |(_, members)| members.as_slice());
+                let cycle = if stacked {
+                    self.cycle.as_slice()
+                } else {
+                    grouped
+                        .as_ref()
+                        .map_or(application.as_slice(), |(_, members)| members.as_slice())
+                };
                 let current = grouped.as_ref().map(|(active, _)| *active).or(self.target);
                 let start = current
                     .and_then(|id| cycle.iter().position(|v| *v == id))

@@ -735,7 +735,22 @@ pub(super) fn ordinary_window_target(
     hwnd: HWND,
     include_minimized: bool,
 ) -> Option<(HWND, u32, Rect)> {
-    let hwnd = normalize_root_owner(hwnd);
+    let original = hwnd;
+    let root = normalize_root_owner(original);
+    // Some applications (notably sandboxed Telegram/Qt) expose a normal,
+    // visible top-level window whose root owner is only a hidden bookkeeping
+    // window.  Normalizing unconditionally makes the real window disappear
+    // from window enumeration.  Prefer the root owner when it is usable, but
+    // retain the original visible window when that owner is hidden or cloaked.
+    let hwnd = if root != original
+        && (!super::native::is_window_visible(root) || is_cloaked(root))
+        && super::native::is_window_visible(original)
+        && !is_cloaked(original)
+    {
+        original
+    } else {
+        root
+    };
     let desktop = super::native::desktop_window();
     let valid = super::native::is_window(hwnd);
     if hwnd.is_invalid()

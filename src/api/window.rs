@@ -270,6 +270,10 @@ pub enum WindowOperation {
     CycleActive {
         backwards: bool,
     },
+    /// Standalone focus cycling restricted to the pointer's overlapping stack.
+    CycleActiveStack {
+        backwards: bool,
+    },
     Tabs(super::window_tabs::TabOperation),
     /// Lock and activate the ordinary window under the physical pointer.
     Acquire(Point),

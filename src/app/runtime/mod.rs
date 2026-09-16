@@ -1682,6 +1682,16 @@ impl Engine {
                         operation: crate::api::window::WindowOperation::CycleActive { backwards },
                     })?;
                 }
+                Command::CycleWindowStack { backwards } => {
+                    backend.request_window(crate::api::window::WindowRequest {
+                        scope: None,
+                        session: 0,
+                        id: 0,
+                        operation: crate::api::window::WindowOperation::CycleActiveStack {
+                            backwards,
+                        },
+                    })?;
+                }
             }
         }
         Ok(())
@@ -1876,6 +1886,17 @@ impl Engine {
                 self.execute_for(
                     &owner,
                     [Command::CycleWindow {
+                        backwards: *backwards,
+                    }],
+                    backend,
+                )?;
+                Ok(true)
+            }
+            Binding::ActivateWindowStack { backwards } => {
+                let owner = self.registry.active.clone();
+                self.execute_for(
+                    &owner,
+                    [Command::CycleWindowStack {
                         backwards: *backwards,
                     }],
                     backend,

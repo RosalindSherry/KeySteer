@@ -182,6 +182,8 @@ pub enum Binding {
     Window(super::window::WindowAction),
     /// Activate a neighbouring window from the pointer without entering Window mode.
     ActivateWindow { backwards: bool },
+    /// Activate a neighbouring window which shares the pointer's stack anchor.
+    ActivateWindowStack { backwards: bool },
     /// Stop the program.
     Quit,
     /// Explicitly unbound: removes an inherited default.
@@ -375,6 +377,9 @@ impl Binding {
             "window_activate_next" | "window_activate_previous" => B::ActivateWindow {
                 backwards: word == "window_activate_previous",
             },
+            "window_activate_next_2" | "window_activate_previous_2" => B::ActivateWindowStack {
+                backwards: word == "window_activate_previous_2",
+            },
             "move_left" => B::Move(Direction::Left),
             "move_down" => B::Move(Down),
             "move_up" => B::Move(Up),
@@ -475,6 +480,12 @@ impl Binding {
                 "window_activate_previous"
             } else {
                 "window_activate_next"
+            }
+            .into(),
+            B::ActivateWindowStack { backwards } => if *backwards {
+                "window_activate_previous_2"
+            } else {
+                "window_activate_next_2"
             }
             .into(),
             B::Sequence(actions) => actions
