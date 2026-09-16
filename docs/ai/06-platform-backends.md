@@ -9,7 +9,7 @@ macOS 不存在 GA_ROOTOWNER；对应漏识别修复位于 `accessibility::windo
 Normal 使用完整候选环：已有标签组按成员顺序相邻，未合并同屏同程序窗口相邻；不能截断为组内环，也不能每次 warp 后围绕当前程序重新旋转，否则连续切换会困在同程序。Window 模式保留已有标签组的组内循环。
 `window_tabs::application_group_key` 复用库存的程序标识与屏幕，供自动归组和切换共同使用；不重复查询原生程序元数据，也不临时创建标签组。
 Windows 从 foreground HWND 匹配稳定 WindowId；macOS 复用 AXFocusedWindow 查询。
-`CycleOverlapping` 与 `CycleActive` 复用同一 worker、命中、稳定环、激活和结果路径。新增内置 `window_overlap_next` / `window_overlap_previous` 只选择与本次起点快照有正面积相交的其他窗口；已有 Tabs 组优先用组内顺序，无匹配时检查全局剩余候选。两轮都要求相交，跳过已查组员；完整遍历无匹配则成功返回空结果，worker 不发 warp 或错误事件。每个候选激活前回读几何，边缘接触不算；不缓存固定重叠集合、不新增模式或 overlay。
+`CycleOverlapping` 与 `CycleActive` 复用同一 worker、命中、稳定环、激活和结果路径。新增内置 `window_overlap_next` / `window_overlap_previous` 只选择本次起点所在相交连通组中的其他窗口（A-B、B-C 相交即可连通 A-C）；已有 Tabs 组优先用组内顺序，无匹配时检查全局剩余候选。两轮都要求属于同一连通组，跳过已查组员；完整遍历无匹配则成功返回空结果，worker 不发 warp 或错误事件。每次使用最新枚举几何计算连通分量，排除最小化窗口，O(n²) 矩形比较、O(n) 存储且支持取消，不为每条边查询原生 API；候选激活前仍验证有效性，边缘接触不算；不缓存固定重叠集合、不新增模式或 overlay。
 请求不回传 UI 库存、不复制结果标签状态、不消费编辑会话的关闭通知；成功后只发中心点，激活失败不移动鼠标。
 
 系统退出保存：Windows 隐藏托盘窗口在 WM_QUERYENDSESSION 将 SaveWorkspace 交给 Engine，托盘线程最多等待 3 秒，不阻塞输入 Hook；仅 WM_ENDSESSION 成功才发 Quit。macOS 复用 retained、主线程限定的 StatusTarget 实现 NSObjectProtocol / NSApplicationDelegate，返回 TerminateLater；Engine 保存后再通过后端回复系统。新增的 unsafe 仅是这两项 Objective-C 协议契约，无额外裸指针操作或 Send/Sync。窗口中心快速面板通过 Backend::focused_window_bounds 读取 Win32／AX 几何，模式和 presentation 不接触平台。

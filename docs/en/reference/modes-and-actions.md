@@ -247,12 +247,12 @@ c = "window_activate_previous"
 
 ## Cycle overlapping windows
 
-`window_overlap_next` / `window_overlap_previous` prefer windows with positive-area overlap
-with the window under the pointer (foreground fallback). Touching edges do not count.
+`window_overlap_next` / `window_overlap_previous` select windows in the overlap-connected component
+of the window under the pointer (foreground fallback). If A overlaps B and B overlaps C, all three belong to the same component even when A and C do not overlap directly. Touching edges do not count.
 Existing Tabs groups take priority in their tab order, followed by the remaining global candidates.
-Non-overlapping candidates are skipped in the requested direction. If the entire ring has no
-overlapping peer, focus and pointer remain unchanged; there is no disjoint-window fallback.
-Overlap is checked against the current window on each step, rather than fixing an initial set.
+Candidates outside the component are skipped in the requested direction. If the entire ring has no
+other component member, focus and pointer remain unchanged; there is no fallback outside the component.
+The component is recomputed from fresh window geometry on each step; minimized windows cannot connect components.
 The pointer follows the activated window's center; no Window mode or window labels appear.
 
 ```toml

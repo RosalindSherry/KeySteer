@@ -1,7 +1,7 @@
 //! Lazy, bounded window-operation worker. Native references are created and
 //! released on its thread; only API values enter the engine's event queue.
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -18,6 +18,35 @@ use crate::support::worker::WorkerJoin;
 pub(crate) struct Snapshot {
     pub info: WindowInfo,
     pub restored: Rect,
+}
+
+/// Flood-fill the fresh inventory without querying native geometry per edge.
+fn overlapping_component(
+    windows: &[WindowInfo],
+    anchor: Option<WindowId>,
+    cancelled: &dyn Fn() -> bool,
+) -> HashSet<WindowId> {
+    let mut members = HashSet::new();
+    let Some(start) = windows.iter().position(|window| Some(window.id) == anchor) else {
+        return members;
+    };
+    let mut queue = vec![start];
+    members.insert(windows[start].id);
+    let mut head = 0;
+    while head < queue.len() {
+        if cancelled() {
+            return HashSet::new();
+        }
+        let bounds = windows[queue[head]].bounds;
+        head += 1;
+        for (index, window) in windows.iter().enumerate() {
+            if !members.contains(&window.id) && bounds.intersect(&window.bounds).is_some() {
+                members.insert(window.id);
+                queue.push(index);
+            }
+        }
+    }
+    members
 }
 
 pub(crate) trait WindowAccess {
@@ -1144,17 +1173,8 @@ impl Session {
                 if cancelled() {
                     return Ok(());
                 }
-                let anchor = if overlapping {
-                    self.target
-                        .map(|id| {
-                            access
-                                .snapshot(id, screens)
-                                .map(|snapshot| (id, snapshot.info.bounds))
-                        })
-                        .transpose()?
-                } else {
-                    None
-                };
+                let component =
+                    overlapping.then(|| overlapping_component(&windows, self.target, cancelled));
                 // Activation changes native Z-order. Preserve the session's
                 // existing ring so successive Tabs visit every window instead
                 // of oscillating between the two most recently activated ones.
@@ -1193,7 +1213,7 @@ impl Session {
                     .map_or(application.as_slice(), |(_, members)| members.as_slice());
                 let current = grouped.as_ref().map(|(active, _)| *active).or(self.target);
                 // Prefer the current tab group, then scan every other candidate.
-                // Both passes require overlap; no match is a successful no-op.
+                // Both passes stay in the overlap component; no match is a no-op.
                 for pass in 0..(1 + usize::from(overlapping && grouped.is_some())) {
                     let cycle = if pass == 1 {
                         application.as_slice()
@@ -1226,19 +1246,18 @@ impl Session {
                         {
                             continue;
                         }
-                        let before = match access.snapshot(id, screens) {
-                            Ok(snapshot) => snapshot,
+                        if component.as_ref().is_some_and(|members| {
+                            Some(id) == self.target || !members.contains(&id)
+                        }) {
+                            continue;
+                        }
+                        match access.snapshot(id, screens) {
+                            Ok(snapshot) if !overlapping || !snapshot.info.minimized => {}
+                            Ok(_) => continue,
                             Err(_) => {
                                 result.skipped += 1;
                                 continue;
                             }
-                        };
-                        if overlapping
-                            && !anchor.is_some_and(|(current, bounds)| {
-                                current != id && bounds.intersect(&before.info.bounds).is_some()
-                            })
-                        {
-                            continue;
                         }
                         // Focus permission is independent of the selected target.
                         // Do not silently cycle all the way back to the old window
@@ -3249,6 +3268,61 @@ mod tests {
                 run(&mut session, &mut access, operation).target.unwrap().id,
                 WindowId(4)
             );
+        }
+    }
+
+    #[test]
+    fn overlapping_cycle_follows_chains_and_rebuilds_after_bridge_changes() {
+        for bridge_change in ["move", "close", "minimize"] {
+            let mut access = Fake::new(5);
+            // A--B--C form a chain; D only touches C; E is a separate island.
+            for (id, x) in [(1, 0.0), (2, 75.0), (3, 150.0), (4, 250.0), (5, 500.0)] {
+                access.windows.get_mut(&WindowId(id)).unwrap().info.bounds =
+                    Rect::new(x, 0.0, 100.0, 100.0);
+            }
+            let mut session = Session::default();
+            access.pointer_target = Some(WindowId(1));
+            for (backwards, expected) in [
+                (true, 3), // A reaches C through B, despite no direct overlap.
+                (false, 1),
+                (false, 2),
+                (false, 3),
+                (true, 2),
+                (true, 1),
+            ] {
+                let result = run(
+                    &mut session,
+                    &mut access,
+                    WindowOperation::CycleOverlapping { backwards },
+                );
+                assert_eq!(result.target.unwrap().id, WindowId(expected));
+                assert_eq!(
+                    result.pointer,
+                    Some(access.windows[&WindowId(expected)].info.bounds.center())
+                );
+                assert!(result.windows.is_none() && result.tabs.is_none());
+                access.pointer_target = Some(WindowId(expected));
+            }
+            match bridge_change {
+                "move" => access.windows.get_mut(&WindowId(2)).unwrap().info.bounds.x = 600.0,
+                "close" => {
+                    access.windows.remove(&WindowId(2));
+                }
+                "minimize" => access.windows.get_mut(&WindowId(2)).unwrap().info.minimized = true,
+                _ => unreachable!(),
+            }
+            for backwards in [false, true] {
+                let result = run(
+                    &mut session,
+                    &mut access,
+                    WindowOperation::CycleOverlapping { backwards },
+                );
+                assert!(
+                    result.pointer.is_none() && result.message.is_none(),
+                    "{bridge_change}"
+                );
+                assert_eq!(access.selected.get(), Some(WindowId(1)));
+            }
         }
     }
 

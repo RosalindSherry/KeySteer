@@ -8,7 +8,7 @@ Windows 隐藏／cloaked owner 的可见顶层回退、子控件命中归一化�
 
 macOS 缺失／无效 AXWindow 的有界顶层与父链回退、AXSubrole 缺失兼容，以及可跨平台测试的 `common/accessibility_window.rs` 见 [UI 扫描](05-ui-scanning.md) 和 [原生后端](06-platform-backends.md)。
 
-相交窗口切换 `window_overlap_next` / `window_overlap_previous`、全局查找与无候选时不操作见 [原生后端](06-platform-backends.md)。
+相交窗口切换 `window_overlap_next` / `window_overlap_previous`、可传递的相交连通组与无候选时不操作见 [原生后端](06-platform-backends.md)。
 
 Normal 独立切换窗口的内置动作 `window_activate_next` / `window_activate_previous`、标签组优先与同程序归组规则复用见 [运行时/API](02-runtime-and-api.md) 和 [原生后端](06-platform-backends.md)。
 
