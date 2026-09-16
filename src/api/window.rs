@@ -266,6 +266,10 @@ pub enum WindowChange {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum WindowOperation {
+    /// Standalone focus cycling; session/id are unused and no WindowResult is emitted.
+    CycleActive {
+        backwards: bool,
+    },
     Tabs(super::window_tabs::TabOperation),
     /// Lock and activate the ordinary window under the physical pointer.
     Acquire(Point),

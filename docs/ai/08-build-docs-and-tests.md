@@ -1,5 +1,7 @@
 # 构建、打包、文档站与测试
 
+Windows 前台锁回归：`foreground_unlock_*` 检查屏蔽批次、自身注入标记、保留已按住 Alt、所有部分发送前缀的清理；ignored `native_explicit_selection_recovers_foreground_lock` 只操作临时自有窗口，先用 LockSetForegroundWindow 验证原始调用被拒绝，再验证共享 select 恢复前后台切换，并恢复原前台。需交互桌面；沙箱 SendInput 拒绝访问不代表产品路径失败。
+
 Window 固定帮助预编译：`window_help_is_precompiled_before_entry_and_reused_across_move_resize_and_reentry` 检查入口前准备、跨会话 Arc 复用与 Resize 隐藏 Other Actions；`precompiled_window_help_matches_dynamic_rendering` 对比单/双栏、Move/Resize 和 1/1.5/2 DPI 的完整场景。分配探针 `precompiled_window_help_allocation_comparison` 必须单线程运行 ignored 测试。2026-09-16 本机 debug 下，1920 宽/1 倍 DPI，当前动态回退构建与预编译消费分别为 Move 817→106、Resize 767→96 次分配；仅比较一次面板重建，不代表整程序延迟或旧版本基准。
 
 macOS `mapped_keyboard_events_*` 回归覆盖左右四类修饰键的全部非空组合、重复发送、

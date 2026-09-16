@@ -228,6 +228,20 @@ Plugins can register verbs in their manifest. Write arguments directly after the
 
 Explicit `call` is useful for a no-argument invocation or to avoid ambiguity. An unknown lowercase verb with parameters is treated as a plugin call. A misspelled built-in action fails when the configuration loads rather than silently sending a key.
 
+## Switch the active window
+
+`window_activate_next` / `window_activate_previous` cycle from the foreground window,
+activate the destination, and center the pointer on it. A grouped window cycles within
+its tab group; otherwise cycling uses ordinary windows across displays, excluding
+minimized windows. These built-in verbs reuse Window's stable ordering without entering
+Window mode or showing titles, numbers, or controls. There are no new default shortcuts:
+
+```toml
+[normal.bindings]
+x = "window_activate_next"
+c = "window_activate_previous"
+```
+
 ## Move a window between displays
 
 The bundled Window Mover plugin exports `move_window next`, `move_window previous` (or `prev`), and numbered destinations such as `move_window 2`.

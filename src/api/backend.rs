@@ -34,6 +34,7 @@ pub enum BackendEvent {
     PointerMoved(Point),
     /// An asynchronous window move finished. Only success requests a pointer warp.
     WindowMoveCompleted(Result<Point, String>),
+    WindowCycleCompleted(Result<Point, String>),
     TextPromptResult {
         id: u64,
         value: Result<Option<String>, String>,

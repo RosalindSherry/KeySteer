@@ -592,6 +592,14 @@ impl WindowAccess for Windows {
         self.hwnd(id)
             .is_ok_and(|hwnd| hwnd == super::native::foreground_window())
     }
+    fn focused_window(&self, windows: &[WindowInfo]) -> Option<WindowId> {
+        let foreground = super::native::foreground_window();
+        windows.iter().find_map(|window| {
+            self.hwnd(window.id)
+                .is_ok_and(|hwnd| hwnd == foreground)
+                .then_some(window.id)
+        })
+    }
     fn tab_watch(&mut self, ids: &[WindowId]) -> Result<(), String> {
         let windows = ids
             .iter()
@@ -917,13 +925,18 @@ impl WindowAccess for Windows {
 
     fn select(&self, id: WindowId) -> Result<(), String> {
         let hwnd = self.hwnd(id)?;
-        // SAFETY: borrowed validated HWND; no pointers retained. This fallback
-        // is used only for an explicit keyboard window-switch request, matching
-        // SwitchToThisWindow's Alt/Tab semantics. Never attach input queues to
-        // foreign UI threads: that can turn activation into an unbounded wait.
-        unsafe {
-            if !SetForegroundWindow(hwnd).as_bool() {
-                SwitchToThisWindow(hwnd, true);
+        // Consumed hook input does not necessarily grant foreground permission.
+        // On rejection, unlock with masked Alt input and retry the same target.
+        // Never attach foreign input queues: a hung app could block our worker.
+        // SAFETY: borrowed validated HWND; no pointers retained.
+        if !unsafe { SetForegroundWindow(hwnd) }.as_bool() {
+            super::input::unlock_foreground()?;
+            let hwnd = self.hwnd(id)?;
+            // SAFETY: the retained identity was revalidated after input injection.
+            unsafe {
+                if !SetForegroundWindow(hwnd).as_bool() {
+                    SwitchToThisWindow(hwnd, true);
+                }
             }
         }
         let deadline = Instant::now() + Duration::from_millis(150);
@@ -1243,6 +1256,42 @@ mod tests {
                 thread.join().unwrap();
             }
         }
+    }
+
+    #[test]
+    #[ignore = "activates only disposable test-owned windows and restores the previous foreground"]
+    fn native_explicit_selection_recovers_foreground_lock() {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            LSFW_LOCK, LSFW_UNLOCK, LockSetForegroundWindow,
+        };
+        struct RestoreForeground(HWND);
+        impl Drop for RestoreForeground {
+            fn drop(&mut self) {
+                // SAFETY: release only the lock acquired by this test; the saved
+                // foreground HWND is borrowed and may have closed meanwhile.
+                unsafe {
+                    let _ = LockSetForegroundWindow(LSFW_UNLOCK);
+                    let _ = SetForegroundWindow(self.0);
+                }
+            }
+        }
+        let _restore = RestoreForeground(super::super::native::foreground_window());
+        let screens = super::super::screens::list_screens().unwrap();
+        let area = screens.iter().find(|s| s.is_primary).unwrap().work_area;
+        let first = Probe::create(area.inset(200.0, 170.0), Default::default(), true);
+        let second = Probe::create(area.inset(260.0, 210.0), Default::default(), true);
+        let mut access = Windows::default();
+        let first_id = access.retain(first.hwnd, &screens).unwrap().id;
+        let second_id = access.retain(second.hwnd, &screens).unwrap().id;
+        access.select(first_id).unwrap();
+        // SAFETY: this process owns the current foreground window.
+        unsafe { LockSetForegroundWindow(LSFW_LOCK) }.unwrap();
+        // SAFETY: live test-owned target; verify the failure this regression fixes.
+        assert!(!unsafe { SetForegroundWindow(second.hwnd) }.as_bool());
+        access.select(second_id).unwrap();
+        assert_eq!(super::super::native::foreground_window(), second.hwnd);
+        access.select(first_id).unwrap();
+        assert_eq!(super::super::native::foreground_window(), first.hwnd);
     }
 
     #[test]

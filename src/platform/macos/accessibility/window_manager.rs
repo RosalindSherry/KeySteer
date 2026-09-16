@@ -417,6 +417,9 @@ impl MacWindows {
 }
 
 impl WindowAccess for MacWindows {
+    fn focused_window(&self, _windows: &[WindowInfo]) -> Option<WindowId> {
+        self.focused_window_id()
+    }
     fn native_batch<R>(work: impl FnOnce() -> R) -> R {
         objc2::rc::autoreleasepool(|_| work())
     }

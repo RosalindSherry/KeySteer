@@ -103,6 +103,7 @@ const actionGroups: ActionGroup[] = [
   {
     name: '窗口移动',
     actions: [
+      ['window_activate_next', '激活下一个窗口并居中鼠标'], ['window_activate_previous', '激活上一个窗口并居中鼠标'],
       ['move_window previous', '窗口移到上一屏'], ['move_window next', '窗口移到下一屏'],
     ].map(([value, label]) => ({ value, label })),
   },

@@ -664,6 +664,48 @@ pub(super) fn send_menu_mask() -> Result<(), String> {
     ])
 }
 
+/// An explicit user-requested foreground switch may be denied because the
+/// triggering key was consumed by our hook. Windows unlocks foreground changes
+/// on Alt input. Mask that input so it cannot open an application menu, and
+/// never release an Alt key already held by the user or a configured action.
+pub(super) fn unlock_foreground() -> Result<(), String> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_MENU};
+    // SAFETY: read-only query of effective modifier state.
+    let alt_down = unsafe { GetAsyncKeyState(VK_MENU.0 as i32) } < 0;
+    unlock_foreground_with(alt_down, try_send)
+}
+
+fn unlock_foreground_with(
+    alt_down: bool,
+    mut attempt: impl FnMut(&[INPUT]) -> Result<(), SendFailure>,
+) -> Result<(), String> {
+    if alt_down {
+        return Ok(());
+    }
+    let inputs = [
+        virtual_key_input(0xA4, KeyState::Down),
+        virtual_key_input(0xE8, KeyState::Down),
+        virtual_key_input(0xE8, KeyState::Up),
+        virtual_key_input(0xA4, KeyState::Up),
+    ];
+    match attempt(&inputs) {
+        Ok(()) => Ok(()),
+        Err(failure) => {
+            if failure.sent > 0 {
+                // A partial SendInput must not leave our Alt or mask held.
+                attempt(&inputs[1..]).map_err(|recovery| {
+                    format!(
+                        "{}; foreground input recovery failed: {}",
+                        failure.message(),
+                        recovery.message()
+                    )
+                })?;
+            }
+            Err(failure.message())
+        }
+    }
+}
+
 /// Submit a complete chord in one native call. If Windows accepts only a
 /// prefix, release every key left down by that prefix before reporting failure.
 pub fn send_keys(events: &[(Key, KeyState)]) -> Result<(), String> {
@@ -989,6 +1031,65 @@ mod tests {
     use super::*;
     use std::hint::black_box;
     use std::time::Instant;
+
+    #[test]
+    fn foreground_unlock_masks_alt_and_preserves_an_existing_hold() {
+        let mut calls = 0;
+        unlock_foreground_with(false, |inputs| {
+            calls += 1;
+            let events: Vec<_> = inputs
+                .iter()
+                .map(|input| {
+                    // SAFETY: the helper emits keyboard inputs only.
+                    let key = unsafe { input.Anonymous.ki };
+                    assert_eq!(key.dwExtraInfo, INJECTED_TAG);
+                    (key.wVk.0, key.dwFlags.contains(KEYEVENTF_KEYUP))
+                })
+                .collect();
+            assert_eq!(
+                events,
+                [(0xA4, false), (0xE8, false), (0xE8, true), (0xA4, true)]
+            );
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(calls, 1);
+        unlock_foreground_with(true, |_| panic!("must not disturb held Alt")).unwrap();
+    }
+
+    #[test]
+    fn foreground_unlock_recovers_every_partial_prefix_without_typing() {
+        for accepted in 0..4 {
+            let mut calls = 0;
+            let mut held = std::collections::BTreeSet::new();
+            let result = unlock_foreground_with(false, |inputs| {
+                calls += 1;
+                let count = if calls == 1 { accepted } else { inputs.len() };
+                for input in inputs.iter().take(count) {
+                    // SAFETY: the helper emits keyboard inputs only.
+                    let key = unsafe { input.Anonymous.ki };
+                    assert!(matches!(key.wVk.0, 0xA4 | 0xE8));
+                    if key.dwFlags.contains(KEYEVENTF_KEYUP) {
+                        held.remove(&key.wVk.0);
+                    } else {
+                        held.insert(key.wVk.0);
+                    }
+                }
+                if calls == 1 {
+                    Err(SendFailure {
+                        sent: accepted,
+                        expected: inputs.len(),
+                        last_error: 0,
+                    })
+                } else {
+                    Ok(())
+                }
+            });
+            assert!(result.is_err());
+            assert!(held.is_empty(), "accepted={accepted}");
+            assert_eq!(calls, if accepted == 0 { 1 } else { 2 });
+        }
+    }
 
     #[test]
     fn physical_only_bindings_leave_character_capture_off() {

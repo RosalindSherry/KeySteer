@@ -1,5 +1,9 @@
 # Release notes
 
+## 0.10.12
+
+- Added configurable `window_activate_next` and `window_activate_previous` actions to switch between windows from Normal mode and center the pointer on the target without entering Window mode.
+
 ## 0.10.11
 
 - Window Move now supports Grid and Recursive Grid targeting, so you can precisely place windows across displays with your configured keyboard shortcuts.

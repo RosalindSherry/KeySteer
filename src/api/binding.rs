@@ -180,6 +180,8 @@ pub enum Binding {
     KeyHelp,
     /// An operation handled by the built-in Window mode.
     Window(super::window::WindowAction),
+    /// Activate a neighbouring foreground window without entering Window mode.
+    ActivateWindow { backwards: bool },
     /// Stop the program.
     Quit,
     /// Explicitly unbound: removes an inherited default.
@@ -370,6 +372,9 @@ impl Binding {
         use ScrollAmount::{Full, Half, Step};
 
         Some(match word {
+            "window_activate_next" | "window_activate_previous" => B::ActivateWindow {
+                backwards: word == "window_activate_previous",
+            },
             "move_left" => B::Move(Direction::Left),
             "move_down" => B::Move(Down),
             "move_up" => B::Move(Up),
@@ -466,6 +471,12 @@ impl Binding {
         };
         match self {
             B::Window(action) => action.name().into(),
+            B::ActivateWindow { backwards } => if *backwards {
+                "window_activate_previous"
+            } else {
+                "window_activate_next"
+            }
+            .into(),
             B::Sequence(actions) => actions
                 .iter()
                 .map(Binding::canonical)

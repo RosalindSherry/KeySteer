@@ -228,6 +228,19 @@ x = "exec cmd /C start notepad"
 
 显式 `call` 适合无参数调用或避免和其他绑定语义混淆。未知的小写动词加参数会作为插件调用；拼写错误的内置动作会在加载时失败，而不是静默发送按键。
 
+## 直接切换窗口
+
+`window_activate_next` / `window_activate_previous` 从当前激活窗口向后／向前循环，激活目标并把鼠标移到其中心。
+当前窗口属于标签组时优先在组内循环，否则使用跨屏的普通窗口列表（不含最小化窗口）。
+复用 Window 的稳定切换顺序，但不进入 Window 模式，也不显示标题、编号或操作界面。
+没有新增默认按键，可自行配置：
+
+```toml
+[normal.bindings]
+x = "window_activate_next"
+c = "window_activate_previous"
+```
+
 ## 跨屏移动窗口
 
 内置 Window Mover 插件提供 `move_window next`、`move_window previous`（或 `prev`）和

@@ -180,6 +180,10 @@ pub(crate) trait WindowAccess {
         }
     }
     fn select(&self, id: WindowId) -> Result<(), String>;
+    /// Resolve native foreground identity after refreshing the inventory.
+    fn focused_window(&self, _windows: &[WindowInfo]) -> Option<WindowId> {
+        None
+    }
     /// Reap native audio routes; true requests a bounded maintenance wakeup.
     fn maintain_audio(&self) -> bool {
         false
@@ -311,6 +315,7 @@ impl WindowWorker {
                 let mut access = super::window_tabs::Grouped::new(native);
                 let mut audio: Option<super::audio_worker::AudioWorker> = None;
                 let mut session = Session::default();
+                let mut focus_cycle = Session::default();
                 let mut displays = Vec::new();
                 loop {
                     let audio_active = A::native_batch(|| {
@@ -414,6 +419,22 @@ impl WindowWorker {
                             }
                             Pending::Window { request, screens } => (request, screens),
                         };
+                        if matches!(request.operation, WindowOperation::CycleActive { .. }) {
+                            let cancelled = || input.stop.load(Ordering::Acquire);
+                            displays.clone_from(&screens);
+                            let result =
+                                focus_cycle.execute(&mut access, request, &screens, &cancelled);
+                            if !cancelled() {
+                                let outcome = match result.message {
+                                    Some(error) => Err(error),
+                                    None => {
+                                        result.pointer.ok_or_else(|| "No window selected".into())
+                                    }
+                                };
+                                emit(BackendEvent::WindowCycleCompleted(outcome));
+                            }
+                            return;
+                        }
                         let id = request.session;
                         let acquisition = matches!(
                             request.operation,
@@ -480,6 +501,18 @@ impl WindowWorker {
             .queue
             .lock()
             .map_err(|_| "window queue poisoned")?;
+        if matches!(request.operation, WindowOperation::CycleActive { .. }) {
+            if queue.len() >= 64 {
+                return Err("window operation queue is full".into());
+            }
+            queue.push_back(Pending::Window {
+                request,
+                screens: screens.to_vec(),
+            });
+            drop(queue);
+            self.mailbox.notify();
+            return Ok(());
+        }
         if matches!(request.operation, WindowOperation::Acquire(_)) {
             self.mailbox
                 .session
@@ -953,7 +986,16 @@ impl Session {
             WindowOperation::BeginEdit { transaction, .. } => Some(*transaction),
             _ => None,
         };
+        let standalone = matches!(request.operation, WindowOperation::CycleActive { .. });
         let outcome = self.apply(access, request.operation, screens, cancelled, &mut result);
+        if standalone {
+            if let Err(error) = outcome {
+                result.message = Some(error);
+            }
+            // No UI inventory, tab-state clone, edit history or lifecycle notifications.
+            // Leave closed identities for the actual window session to consume.
+            return result;
+        }
         if let Err(error) = outcome {
             if !cancelled() {
                 self.error = Some(error.clone());
@@ -1074,10 +1116,22 @@ impl Session {
                 result.pointer = Some(after.info.bounds.center());
                 result.target = Some(after.info);
             }
-            WindowOperation::Cycle | WindowOperation::CyclePrevious => {
-                let backwards = matches!(operation, WindowOperation::CyclePrevious);
-                let windows = self.enumerate(access, screens, cancelled)?;
-                result.windows = Some(windows.clone());
+            WindowOperation::Cycle
+            | WindowOperation::CyclePrevious
+            | WindowOperation::CycleActive { .. } => {
+                let standalone = matches!(operation, WindowOperation::CycleActive { .. });
+                let backwards = matches!(
+                    operation,
+                    WindowOperation::CyclePrevious
+                        | WindowOperation::CycleActive { backwards: true }
+                );
+                let mut windows = self.enumerate(access, screens, cancelled)?;
+                if standalone {
+                    windows.retain(|window| !window.minimized);
+                    self.target = access.focused_window(&windows);
+                } else {
+                    result.windows = Some(windows.clone());
+                }
                 if cancelled() {
                     return Ok(());
                 }
@@ -1936,6 +1990,9 @@ mod tests {
     }
 
     impl WindowAccess for Fake {
+        fn focused_window(&self, _windows: &[WindowInfo]) -> Option<WindowId> {
+            self.selected.get()
+        }
         fn acquire(&mut self, _: Point, _: &[Screen]) -> Result<Option<WindowInfo>, String> {
             Ok(self.windows.values().next().map(|s| s.info.clone()))
         }
@@ -3062,6 +3119,80 @@ mod tests {
             );
             assert_eq!(result.message.as_deref(), Some("focus denied"));
         }
+    }
+
+    #[test]
+    fn standalone_cycle_tracks_foreground_and_returns_no_ui_inventory() {
+        let mut access = Fake::new(3);
+        let mut session = Session::default();
+        access.selected.set(Some(WindowId(2)));
+        for (backwards, expected) in [(false, 3), (false, 1), (true, 3)] {
+            let result = run(
+                &mut session,
+                &mut access,
+                WindowOperation::CycleActive { backwards },
+            );
+            assert_eq!(access.selected.get(), Some(WindowId(expected)));
+            assert_eq!(
+                result.pointer,
+                Some(access.windows[&WindowId(expected)].info.bounds.center())
+            );
+            assert!(result.windows.is_none() && result.tabs.is_none());
+            assert!(session.history.is_empty() && session.initial.is_empty());
+        }
+        // External focus changes override our previous target; the pointer is elsewhere.
+        access.selected.set(Some(WindowId(1)));
+        let result = run(
+            &mut session,
+            &mut access,
+            WindowOperation::CycleActive { backwards: false },
+        );
+        assert_eq!(result.target.unwrap().id, WindowId(2));
+        access.windows.remove(&WindowId(3));
+        let result = run(
+            &mut session,
+            &mut access,
+            WindowOperation::CycleActive { backwards: false },
+        );
+        assert_eq!(result.target.unwrap().id, WindowId(1));
+    }
+
+    #[test]
+    fn standalone_cycle_worker_needs_no_session_and_only_emits_pointer_result() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut worker = WindowWorker::start(
+            || {
+                let fake = Fake::new(3);
+                fake.selected.set(Some(WindowId(1)));
+                fake
+            },
+            move |event| {
+                tx.send(event).unwrap();
+            },
+        )
+        .unwrap();
+        for (backwards, expected) in [(false, 2), (false, 3), (true, 2)] {
+            worker
+                .submit(
+                    WindowRequest {
+                        scope: None,
+                        session: 0,
+                        id: 0,
+                        operation: WindowOperation::CycleActive { backwards },
+                    },
+                    &screens(),
+                )
+                .unwrap();
+            let event = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            assert!(
+                matches!(event, BackendEvent::WindowCycleCompleted(Ok(point))
+                if point == Fake::new(3).windows[&WindowId(expected)].info.bounds.center())
+            );
+        }
+        assert!(rx.try_recv().is_err());
+        worker
+            .stop_until(Instant::now() + Duration::from_secs(2))
+            .unwrap();
     }
 
     #[test]

@@ -349,3 +349,10 @@ Mode::accepts_window_targeting 表示当前窗口状态允许在其上运行 Gri
 # 固定窗口帮助的编译边界
 
 Mode::fixed_key_help 与 claims_key_for_help 提供不依赖当前会话的内置提示和原始键归属。Engine 的帮助解析器接受显式参考 mode，预编译 Window 时不读取活动模式、按住键或输入消费状态，也不临时切换 active。registry::rebuild_tables 生成五个 `Arc<WindowKeyHelpPlan>`；presentation::compile_window_help 生成 Move/Resize 的固定语义行，运行时只选择内容并处理实际屏幕几何。
+
+# Normal 直接激活窗口
+
+`window_activate_next` / `window_activate_previous` 编译为 `Binding::ActivateWindow`，由
+Engine 直接执行 `Command::CycleWindow`，经 `Backend::request_window` 提交独立 `CycleActive`。
+不调用插件、不进入 Window、不注册编辑会话、不显示标题／编号 overlay，也不发 `Clicked`。
+成功结果 `WindowCycleCompleted` 只带中心点，复用标准 warp 路径同步权威鼠标位置；失败仅记录错误。

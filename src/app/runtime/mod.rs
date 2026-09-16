@@ -663,6 +663,13 @@ impl Engine {
             BackendEvent::InputCaptureLost(message) => {
                 self.reset_runtime_input_state(&message, true, backend);
             }
+            BackendEvent::WindowCycleCompleted(result) => match result {
+                Ok(point) => {
+                    let owner = self.registry.active.clone();
+                    self.execute_for(&owner, [Command::warp_to(point)], backend)?;
+                }
+                Err(message) => crate::support::logging::report_error("window-cycle", message),
+            },
             BackendEvent::WindowMoveCompleted(result) => match result {
                 Ok(point) => {
                     let owner = self.registry.active.clone();
@@ -1667,6 +1674,14 @@ impl Engine {
                         self.execute_for(owner, [Command::warp_to(pointer)], backend)?;
                     }
                 }
+                Command::CycleWindow { backwards } => {
+                    backend.request_window(crate::api::window::WindowRequest {
+                        scope: None,
+                        session: 0,
+                        id: 0,
+                        operation: crate::api::window::WindowOperation::CycleActive { backwards },
+                    })?;
+                }
             }
         }
         Ok(())
@@ -1856,6 +1871,17 @@ impl Engine {
         }
 
         match binding {
+            Binding::ActivateWindow { backwards } => {
+                let owner = self.registry.active.clone();
+                self.execute_for(
+                    &owner,
+                    [Command::CycleWindow {
+                        backwards: *backwards,
+                    }],
+                    backend,
+                )?;
+                Ok(true)
+            }
             Binding::KeyHelp => {
                 if self.registry.active != ModeId::idle() {
                     if self.display_mode().is_window() {

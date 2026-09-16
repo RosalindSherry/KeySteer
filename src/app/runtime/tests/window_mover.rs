@@ -7,6 +7,50 @@ fn chord_test_engine(config: &Config) -> Engine {
 }
 
 #[test]
+fn standalone_window_verbs_keep_normal_without_window_ui_or_sessions() {
+    let config = Config::parse(
+        r#"
+        [normal.bindings]
+        x = "window_activate_next"
+        c = "window_activate_previous"
+    "#,
+    )
+    .unwrap();
+    let mut engine = chord_test_engine(&config);
+    let (mut backend, log) = FakeBackend::new(vec![]);
+    engine.screens = backend.screens().unwrap();
+    engine.set_active(ModeId::normal());
+    engine.rebuild_tables();
+    let presents = log.lock().unwrap().presents;
+    for (key, backwards) in [("x", false), ("c", true)] {
+        engine
+            .handle_backend_event(key_down(key), &mut backend)
+            .unwrap();
+        engine
+            .handle_backend_event(key_up(key), &mut backend)
+            .unwrap();
+        assert_eq!(engine.active_mode(), &ModeId::normal());
+        assert!(engine.scheduler.window_sessions.is_empty());
+        let log = log.lock().unwrap();
+        assert_eq!(
+            log.window_requests.last().unwrap().operation,
+            crate::api::window::WindowOperation::CycleActive { backwards }
+        );
+        assert_eq!(log.presents, presents);
+    }
+    for result in [Ok(Point::new(250.0, 200.0)), Err("focus denied".into())] {
+        engine
+            .handle_backend_event(BackendEvent::WindowCycleCompleted(result), &mut backend)
+            .unwrap();
+    }
+    assert_eq!(engine.cursor, Point::new(250.0, 200.0));
+    let log = log.lock().unwrap();
+    assert_eq!(log.warps, [engine.cursor]);
+    assert!(log.buttons.is_empty());
+    assert_eq!(log.presents, presents);
+}
+
+#[test]
 #[ignore = "allocation and preparation benchmark; run alone with --test-threads=1"]
 fn mapped_chord_preparation_performance() {
     use std::hint::black_box;
@@ -1454,8 +1498,11 @@ fn default_mapped_chord_restores_all_sources_after_suspension_failure() {
     let modifiers = [Key::new("alt").unwrap(), Key::new("shift").unwrap()];
     let result = backend.send_chord_suspending(&[Key::new("down").unwrap()], &modifiers);
     assert_eq!(result, Err("mapped chord: injected key-up failure".into()));
-    assert_eq!(log.lock().unwrap().sent, [
-        ("alt".to_string(), KeyState::Down),
-        ("shift".to_string(), KeyState::Down),
-    ]);
+    assert_eq!(
+        log.lock().unwrap().sent,
+        [
+            ("alt".to_string(), KeyState::Down),
+            ("shift".to_string(), KeyState::Down),
+        ]
+    );
 }

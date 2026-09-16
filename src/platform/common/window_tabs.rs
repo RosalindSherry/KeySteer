@@ -1195,6 +1195,9 @@ impl<A: WindowAccess> WindowAccess for Grouped<A> {
             })
             .transpose()
     }
+    fn focused_window(&self, windows: &[WindowInfo]) -> Option<WindowId> {
+        self.native.focused_window(windows)
+    }
     fn enumerate(
         &mut self,
         screens: &[Screen],

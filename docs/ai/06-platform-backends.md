@@ -1,5 +1,10 @@
 # Windows 与 macOS 原生后端
 
+独立 `CycleActive` 请求由现有 window worker 异步处理，复用 `Cycle` / `CyclePrevious`
+的稳定环与组内优先选择。独立环不占用编辑会话，每次枚举后读取系统前台身份，而非鼠标命中或旧目标。
+Windows 从 foreground HWND 匹配稳定 WindowId；macOS 复用 AXFocusedWindow 查询。
+请求不回传 UI 库存、不复制结果标签状态、不消费编辑会话的关闭通知；成功后只发中心点，激活失败不移动鼠标。
+
 系统退出保存：Windows 隐藏托盘窗口在 WM_QUERYENDSESSION 将 SaveWorkspace 交给 Engine，托盘线程最多等待 3 秒，不阻塞输入 Hook；仅 WM_ENDSESSION 成功才发 Quit。macOS 复用 retained、主线程限定的 StatusTarget 实现 NSObjectProtocol / NSApplicationDelegate，返回 TerminateLater；Engine 保存后再通过后端回复系统。新增的 unsafe 仅是这两项 Objective-C 协议契约，无额外裸指针操作或 Send/Sync。窗口中心快速面板通过 Backend::focused_window_bounds 读取 Win32／AX 几何，模式和 presentation 不接触平台。
 
 Grouped 按 WindowScope 筛选逻辑快照；活动组的隐藏成员仍继承活动成员的屏幕与最小化状态。编号在同一会话／范围内按窗口身份保留：最小化或暂时未进入候选库存不释放号码，恢复后沿用；仅明确关闭才删除，Acquire 或范围配置变化才清空并从 1 重建。可选数字仍只来自当前库存。持久组不随范围切换解散，范围外原生标签栏仍保留所有标题与点击目标，仅省略无效编号（TabBar 数字 0）。Windows ordinary_window_target 允许最小化库存，scannable_target 继续排除最小化 UI 扫描；最小化的屏幕归属从还原矩形确定。macOS 开启包含最小化时额外检查运行应用 AXWindows，普通窗口仍通过当前可见 Quartz 元数据匹配。
@@ -54,7 +59,7 @@ macOS adapter 保留 AX 元素，以公开 Quartz on-screen 元数据匹配当�
 
 Window 的 Tab / Shift+Tab 按需枚举，沿同一稳定 ID 顺序向前／向后激活并返回中心鼠标位置，库存包含普通窗口及每个隐藏的分组成员。数字保持同样的逐窗口身份。成员显示成功但系统拒绝焦点时仍提交活动成员状态；旧焦点或成员几何通知不能覆盖明确选窗。显式 window_tile 只处理目标所在屏幕，跳过不可缩放/原生全屏窗口，整个批次不逐个 warp。单窗及撤销使用原生快照回读，窗口拒绝或关闭时保留实际改变/跳过计数。共享几何不调用平台 API。
 
-Windows 显式 Tab 先调用 SetForegroundWindow，被拒绝后使用 SwitchToThisWindow 的键盘切换路径，并在 worker 中有界回读前台。不得用 AttachThreadInput 连接外部输入队列造成无界同步等待。最终拒绝焦点时仍锁定下一窗口、返回其中心坐标并提示。
+Windows 显式选窗（含 Normal 激活动作）先调用 SetForegroundWindow；被拒绝后发送带自身注入标记和菜单屏蔽的 Alt 批次以解除前台锁，再重试，最后保留 SwitchToThisWindow 回退。已按住 Alt 时不注入、不释放；部分注入失败补发屏蔽与释放，避免残留。恢复仅发生在显式激活失败路径，worker 有界回读前台，不用 AttachThreadInput 连接外部输入队列。Window 模式最终拒绝焦点时仍锁定下一窗口并提示；Normal 独立激活动作失败不移动鼠标。
 
 平铺优先保留满足所有最小尺寸的均分方案，否则重新分配行列空间；没有无重叠方案时按最小尺寸提交并约束位置，不能因格子太小跳过应用。尺寸下限查询之间检查取消。原生回读决定实际变化及撤销记录。
 

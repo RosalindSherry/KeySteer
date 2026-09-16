@@ -1,5 +1,11 @@
 # 更新日志 / Release Notes
 
+## 0.10.12
+
+- 新增可配置的 `window_activate_next` / `window_activate_previous` 动作，可在 Normal 模式中直接切换前后窗口并将鼠标移到目标窗口中心，无需进入 Window 模式。
+
+- Added configurable `window_activate_next` and `window_activate_previous` actions to switch between windows from Normal mode and center the pointer on the target without entering Window mode.
+
 ## 0.10.11
 
 - Window 移动现在支持 Grid 和 Recursive Grid 精确定位窗口，可使用已配置的快捷键在不同屏幕间快速放置窗口。
