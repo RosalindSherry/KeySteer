@@ -343,3 +343,9 @@ Mode::cursor_indicator_detail defaults to indicator_detail and allows a compact
 cursor-badge status separate from the full help-panel content. Window returns
 Move/Resize here; the engine appends it to the Window name on the same line.
 Its existing indicator_detail remains the panel detail.
+# Window Move 上层定位
+
+Mode::accepts_window_targeting 表示当前窗口状态允许在其上运行 Grid/Recursive Grid。Engine 保留 modal owner，将上层成功的 MovePointer/WarpPointer 结果通过 ModeEvent::PointerMoved 交给 Window，后者发 WindowChange::MoveTo(Point) 的异步 WindowRequest。暂停的 Window 结果不能覆盖上层场景或回放指针；不增加原生 API 到 Mode。
+# 固定窗口帮助的编译边界
+
+Mode::fixed_key_help 与 claims_key_for_help 提供不依赖当前会话的内置提示和原始键归属。Engine 的帮助解析器接受显式参考 mode，预编译 Window 时不读取活动模式、按住键或输入消费状态，也不临时切换 active。registry::rebuild_tables 生成五个 Arc<WindowKeyHelpPlan>；presentation::compile_window_help 生成 Move/Resize 的固定语义行，运行时只选择内容并处理实际屏幕几何。

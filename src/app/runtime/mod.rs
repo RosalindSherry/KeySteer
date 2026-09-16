@@ -329,6 +329,18 @@ impl Engine {
             );
         }
         self.input.reset_for_plan_swap();
+        for owner in self.registry.modal_stack.clone() {
+            let context = HostContext {
+                presenter: &crate::presentation::COMPOSER,
+                screens: &self.screens,
+                cursor: self.cursor,
+                focused_app: self.focused_app.as_ref(),
+                palette: &self.palette,
+            };
+            if let Some(mode) = self.registry.get_mut(&owner) {
+                let _ = mode.handle(&ModeEvent::Deactivated, &context);
+            }
+        }
         self.registry.modal_stack.clear();
         for session in std::mem::take(&mut self.scheduler.audio_sessions).into_keys() {
             backend.cancel_audio_session(session);
@@ -994,6 +1006,25 @@ impl Engine {
             return Ok(());
         }
 
+        let grid = target == ModeId::grid() || target == ModeId::recursive_grid();
+        if grid
+            && self
+                .registry
+                .get(&self.registry.active)
+                .is_some_and(|mode| mode.accepts_window_targeting())
+        {
+            return self.push_mode(target, backend);
+        }
+        if self.registry.modal_stack.contains(&ModeId::window()) && !grid {
+            while self.registry.active != ModeId::window() {
+                self.pop_mode(backend)?;
+            }
+            if target == ModeId::normal() || target == ModeId::idle() || target == ModeId::window()
+            {
+                return Ok(());
+            }
+        }
+
         if target != self.registry.active {
             // Native text entry belongs to the outgoing interaction, even when
             // its final layout acknowledgement defers the actual mode switch.
@@ -1268,6 +1299,17 @@ impl Engine {
         backend: &mut dyn Backend,
     ) -> Result<(), String> {
         for command in commands {
+            // A suspended window continues receiving asynchronous results, but
+            // must not repaint over the picker or replay an old native pointer.
+            if *owner == ModeId::window()
+                && self.registry.modal_stack.contains(owner)
+                && matches!(
+                    command,
+                    Command::ShowOverlay(_) | Command::HideOverlay | Command::WarpPointer { .. }
+                )
+            {
+                continue;
+            }
             let trace_command = if matches!(&command, Command::MovePointer { .. }) {
                 self.settings.debug.motion
             } else {
@@ -1404,6 +1446,9 @@ impl Engine {
                     // input hook. Store the constrained position actually sent.
                     let previous_bounds = self.context().active_bounds();
                     self.cursor = to;
+                    if self.registry.modal_stack.contains(&ModeId::window()) {
+                        self.dispatch_to(&ModeId::window(), ModeEvent::PointerMoved(to), backend)?;
+                    }
                     if previous_bounds != self.context().active_bounds() {
                         self.dispatch(ModeEvent::PointerMoved(to), backend)?;
                     }
@@ -1428,6 +1473,9 @@ impl Engine {
                     });
                     let previous_bounds = self.context().active_bounds();
                     self.cursor = to;
+                    if self.registry.modal_stack.contains(&ModeId::window()) {
+                        self.dispatch_to(&ModeId::window(), ModeEvent::PointerMoved(to), backend)?;
+                    }
                     if previous_bounds != self.context().active_bounds() {
                         self.dispatch(ModeEvent::PointerMoved(to), backend)?;
                     }
@@ -1533,7 +1581,9 @@ impl Engine {
 
                 Command::SwitchMode(id) => {
                     let previous = Some(self.registry.active.clone());
-                    self.registry.modal_stack.clear();
+                    if !self.registry.modal_stack.contains(&ModeId::window()) {
+                        self.registry.modal_stack.clear();
+                    }
                     self.activate(id, previous, backend)?;
                 }
                 Command::PushMode(id) => self.push_mode(id, backend)?,

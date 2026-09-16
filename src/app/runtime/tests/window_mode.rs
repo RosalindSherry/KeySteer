@@ -1607,3 +1607,215 @@ fn window_help_cache_restores_connectors_with_displaced_labels() {
     assert_eq!(changed, rebuilt);
     assert_ne!(changed.shapes, first.shapes);
 }
+#[test]
+fn window_targeting_uses_real_grid_lifecycle_and_keeps_window_session() {
+    use crate::api::window::{WindowOperation as O, WindowChange, WindowId};
+    for (recursive, temporary) in [(false, false), (false, true), (true, true)] {
+        let mut config = Config::default();
+        config.grid.cursor_follow_selection = true;
+        config.grid.lifecycle.after_finish = crate::api::LifecycleAction::Keep;
+        config.recursive_grid.cursor_follow_selection = true;
+        let primary = config.resolved_key_aliases()["primary"].clone();
+        let (mut engine, mut backend, log) = window_test_engine(&config);
+        let initial = enter_window(&mut engine, &mut backend, &log);
+        let entrance = if recursive { "f" } else { "g" };
+        let keys = if temporary { vec![primary.as_str(), entrance] } else { vec![entrance] };
+        for key in &keys { engine.handle_backend_event(key_down(key), &mut backend).unwrap(); }
+        for key in keys.iter().rev() { engine.handle_backend_event(key_up(key), &mut backend).unwrap(); }
+        let expected = if recursive { ModeId::recursive_grid() } else { ModeId::grid() };
+        assert_eq!(engine.active_mode(), &expected);
+        assert_eq!(engine.registry.modal_stack, vec![ModeId::window()]);
+        for key in ["a", "tab", "a", "space", "a"] {
+            for event in [key_down(key), key_up(key)] { engine.handle_backend_event(event, &mut backend).unwrap(); }
+            assert_eq!(engine.active_mode(), &expected);
+        }
+        let requests = log.lock().unwrap().window_requests.clone();
+        let points: Vec<_> = requests.iter().filter_map(|r| match r.operation {
+            O::Adjust { target: WindowId(77), change: WindowChange::MoveTo(point), group } => {
+                assert_eq!(r.session, initial.session);
+                Some((point, group))
+            }, _ => None,
+        }).collect();
+        assert!(points.len() >= 3);
+        assert!(points.iter().all(|(_, group)| *group == points[0].1));
+        let original_point = engine.cursor;
+        let mut second = engine.screens[0].clone();
+        let offset = second.bounds.width;
+        second.bounds.x += offset;
+        second.work_area.x += offset;
+        second.is_primary = false;
+        engine.screens.push(second);
+        engine.execute([Command::RetargetScreen { index: 1, preserve: true }], &mut backend).unwrap();
+        assert_eq!(engine.cursor, Point::new(original_point.x + offset, original_point.y));
+        assert_eq!(engine.active_mode(), &expected);
+        assert!(matches!(log.lock().unwrap().window_requests.last().unwrap().operation,
+            O::Adjust { change: WindowChange::MoveTo(point), .. } if point == engine.cursor));
+        for event in [key_down("esc"), key_up("esc")] { engine.handle_backend_event(event, &mut backend).unwrap(); }
+        assert_eq!(engine.active_mode(), &ModeId::window());
+        assert!(engine.registry.modal_stack.is_empty());
+        assert!(!log.lock().unwrap().cancelled_window_sessions.contains(&initial.session));
+        for event in [key_down("h"), key_up("h")] { engine.handle_backend_event(event, &mut backend).unwrap(); }
+        assert!(matches!(log.lock().unwrap().window_requests.last().unwrap().operation,
+            O::Adjust { target: WindowId(77), change: WindowChange::Move { .. }, .. }));
+    }
+}
+
+#[test]
+fn window_targeting_default_finish_resumes_and_late_results_do_not_cover_grid() {
+    use crate::api::window::WindowResult;
+    let mut config = Config::default();
+    config.grid.max_depth = 1;
+    let (mut engine, mut backend, log) = window_test_engine(&config);
+    let initial = enter_window(&mut engine, &mut backend, &log);
+    for event in [key_down("g"), key_up("g")] { engine.handle_backend_event(event, &mut backend).unwrap(); }
+    let scene = log.lock().unwrap().scenes.last().unwrap().clone();
+    let cursor = engine.cursor;
+    engine.handle_backend_event(BackendEvent::WindowResult(Box::new(WindowResult {
+        session: initial.session, id: initial.id, target: None, windows: None,
+        pointer: Some(Point::new(17.0, 23.0)), changed: 1, skipped: 0,
+        message: Some("late feedback".into()), edit: None, tabs: None, closed: Vec::new(),
+    })), &mut backend).unwrap();
+    assert_eq!(engine.cursor, cursor);
+    assert_eq!(*log.lock().unwrap().scenes.last().unwrap(), scene);
+    for event in [key_down("a"), key_up("a")] { engine.handle_backend_event(event, &mut backend).unwrap(); }
+    assert_eq!(engine.active_mode(), &ModeId::window());
+    assert!(!log.lock().unwrap().cancelled_window_sessions.contains(&initial.session));
+}
+
+#[test]
+fn window_targeting_entrances_respect_conflicts_and_normal_rebinding() {
+    let mut config = Config::default();
+    config.normal.bindings.remove("g");
+    config.normal.bindings.insert("b".into(), Binding::Mode(ModeId::grid()));
+    config.window.bindings.insert("b".into(), Binding::Disabled);
+    config.normal.bindings.insert("n".into(), Binding::Mode(ModeId::grid()));
+    let (engine, _, _) = window_test_engine(&config);
+    let bindings = engine.bindings_in(&ModeId::window());
+    assert!(bindings.contains(&("n".into(), Binding::Mode(ModeId::grid()))));
+    assert!(bindings.contains(&("b".into(), Binding::Disabled)));
+    assert!(!bindings.iter().any(|(key, _)| key == "g"));
+    assert!(bindings.contains(&("f".into(), Binding::Window(crate::api::window::WindowAction::ToggleMaximize))));
+}
+
+#[test]
+fn window_targeting_entrances_follow_aliases_and_application_overrides() {
+    let config = Config::parse(r#"
+[key_aliases]
+picker = "b"
+recursive_picker = "n"
+[normal.bindings]
+picker = "grid"
+recursive_picker = "recursive_grid"
+[[normal.app_configs]]
+bundle_id = "custom.exe"
+[normal.app_configs.bindings]
+picker = "none"
+recursive_picker = "grid"
+m = "recursive_grid"
+[window.bindings]
+b = "none"
+[[window.app_configs]]
+bundle_id = "custom.exe"
+[window.app_configs.bindings]
+m = "window_center"
+"#).unwrap();
+    let (mut engine, mut backend, log) = window_test_engine(&config);
+    let bindings = engine.bindings_in(&ModeId::window());
+    assert!(bindings.contains(&("b".into(), Binding::Disabled)));
+    assert!(bindings.contains(&("n".into(), Binding::Mode(ModeId::recursive_grid()))));
+    engine.focused_app = Some(FocusedApp {
+        bundle_id: "custom.exe".into(), window_title: "Custom".into(), process_id: 42,
+    });
+    engine.rebuild_tables();
+    let bindings = engine.bindings_in(&ModeId::window());
+    assert!(bindings.contains(&("b".into(), Binding::Disabled)));
+    assert!(bindings.contains(&("n".into(), Binding::Mode(ModeId::grid()))));
+    assert!(bindings.contains(&("m".into(), Binding::Window(crate::api::window::WindowAction::Center))));
+    enter_window(&mut engine, &mut backend, &log);
+    for event in [key_down("n"), key_up("n")] { engine.handle_backend_event(event, &mut backend).unwrap(); }
+    assert_eq!(engine.active_mode(), &ModeId::grid());
+    assert_eq!(engine.registry.modal_stack, vec![ModeId::window()]);
+}
+
+#[test]
+fn window_targeting_waits_for_async_acquire_without_losing_the_latest_point() {
+    use crate::api::window::{WindowInfo, WindowId, WindowResult, WindowOperation, WindowChange};
+    let (mut engine, mut backend, log) = window_test_engine(&Config::default());
+    engine.activate(ModeId::window(), Some(ModeId::normal()), &mut backend).unwrap();
+    let request = log.lock().unwrap().window_requests.last().unwrap().clone();
+    for key in ["g", "a"] {
+        for event in [key_down(key), key_up(key)] { engine.handle_backend_event(event, &mut backend).unwrap(); }
+    }
+    assert_eq!(engine.active_mode(), &ModeId::grid());
+    let point = engine.cursor;
+    let target = WindowInfo { id: WindowId(77), title: "Test".into(), app: "test".into(),
+        bounds: Rect::new(100.0, 100.0, 400.0, 300.0), screen: 0,
+        resizable: true, maximized: false, minimized: false, fullscreen: false };
+    engine.handle_backend_event(BackendEvent::WindowResult(Box::new(WindowResult {
+        session: request.session, id: request.id, target: Some(target.clone()), windows: Some(vec![target]),
+        pointer: None, changed: 0, skipped: 0, message: None, edit: None, tabs: None, closed: Vec::new(),
+    })), &mut backend).unwrap();
+    assert_eq!(engine.active_mode(), &ModeId::grid());
+    assert!(log.lock().unwrap().window_requests.iter().any(|r| matches!(r.operation,
+        WindowOperation::Adjust { target: WindowId(77), change: WindowChange::MoveTo(p), .. } if p == point)));
+}
+#[test]
+fn window_targeting_help_shows_temporary_entrances_without_holding_modifier() {
+    let config = Config::default();
+    let primary = &config.resolved_key_aliases()["primary"];
+    let (mut engine, mut backend, log) = window_test_engine(&config);
+    enter_window(&mut engine, &mut backend, &log);
+    let entries = engine.key_help_entries();
+    for (key, mode) in [("g".to_owned(), "grid"), (format!("{primary}+g"), "grid"),
+        (format!("{primary}+f"), "recursive_grid")] {
+        let chord = KeyChord::parse(&key).unwrap().canonical();
+        assert!(entries.contains(&format!("{chord}  ·  {mode}")), "{entries:?}");
+    }
+    assert!(!entries.contains(&"f  ·  recursive_grid".to_owned()));
+    let log = log.lock().unwrap();
+    let scene = log.scenes.last().unwrap();
+    assert!(scene.labels.iter().any(|label| label.text == "OTHER ACTIONS"));
+    assert!(scene.labels.iter().any(|label| label.text == "Recursive Grid"));
+    assert!(scene.labels.iter().any(|label| label.text == "Exit → Idle"));
+}
+
+#[test]
+fn window_targeting_help_respects_custom_temporary_keys_and_explicit_conflicts() {
+    let mut config = Config::default();
+    config.window.temporary_mode_keys = vec!["ctrl".into(), "alt".into()];
+    config.normal.bindings.remove("f");
+    config.normal.bindings.insert("n".into(), Binding::Mode(ModeId::recursive_grid()));
+    config.window.bindings.insert("n".into(), Binding::Window(crate::api::window::WindowAction::Center));
+    config.window.bindings.insert("ctrl+n".into(), Binding::Disabled);
+    let (mut engine, mut backend, log) = window_test_engine(&config);
+    enter_window(&mut engine, &mut backend, &log);
+    let entries = engine.key_help_entries();
+    assert!(entries.contains(&"alt+n  ·  recursive_grid".to_owned()), "{entries:?}");
+    for key in ["n", "ctrl+n", "alt+f", "ctrl+f"] {
+        assert!(!entries.contains(&format!("{key}  ·  recursive_grid")));
+    }
+}
+#[test]
+fn window_help_is_precompiled_before_entry_and_reused_across_move_resize_and_reentry() {
+    let (mut engine, mut backend, log) = window_test_engine(&Config::default());
+    let compiled = engine.registry.window_help_plans[&ModeId::window()].clone();
+    assert!(compiled.entries.iter().any(|entry| entry.ends_with(" ·  recursive_grid")));
+    assert_eq!(engine.registry.window_help_plans.len(), 5);
+    let rebuilds = engine.registry.table_rebuild_count;
+    for _ in 0..2 {
+        enter_window(&mut engine, &mut backend, &log);
+        assert!(Arc::ptr_eq(&compiled, engine.overlay.window_help_plan.as_ref().unwrap()));
+        for resizing in [true, false] {
+            for event in [key_down("s"), key_up("s")] {
+                engine.handle_backend_event(event, &mut backend).unwrap();
+            }
+            assert!(Arc::ptr_eq(&compiled, engine.overlay.window_help_plan.as_ref().unwrap()));
+            let log = log.lock().unwrap();
+            let scene = log.scenes.last().unwrap();
+            assert_eq!(scene.labels.iter().any(|label| label.text == "OTHER ACTIONS"), !resizing);
+            assert_eq!(scene.labels.iter().any(|label| label.text == "Recursive Grid"), !resizing);
+        }
+        engine.activate(ModeId::idle(), Some(ModeId::window()), &mut backend).unwrap();
+    }
+    assert_eq!(engine.registry.table_rebuild_count, rebuilds);
+}

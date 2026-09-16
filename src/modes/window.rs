@@ -126,6 +126,7 @@ pub struct WindowSession {
     result: u64,
     group: u64,
     target: Option<WindowInfo>,
+    pending_move_to: Option<Point>,
     screen: usize,
     inventory: BTreeMap<WindowId, WindowInfo>,
     visible: Vec<WindowId>,
@@ -177,6 +178,7 @@ impl WindowSession {
             result: 0,
             group: 0,
             target: None,
+            pending_move_to: None,
             screen: 0,
             inventory: BTreeMap::new(),
             visible: Vec::new(),
@@ -588,6 +590,7 @@ impl WindowSession {
                 self.temporary = false;
                 self.held.clear();
                 self.target = None;
+                self.pending_move_to = None;
                 self.edit = None;
                 self.inventory.clear();
                 self.visible.clear();
@@ -654,6 +657,7 @@ impl WindowSession {
                 self.numbers.clear();
                 self.status = None;
                 self.target = None;
+                self.pending_move_to = None;
                 self.edit = None;
                 self.inventory.clear();
                 self.visible.clear();
@@ -667,8 +671,18 @@ impl WindowSession {
             }
             ModeEvent::Suspended => {
                 self.stop_movement(&mut out);
+                self.temporary = false;
+                self.group += 1;
             }
             ModeEvent::Resumed => {}
+            ModeEvent::PointerMoved(point) if self.kind == WindowKind::Move && !self.size => {
+                if self.target.is_some() {
+                    self.adjust(WindowChange::MoveTo(*point), &mut out);
+                } else {
+                    self.pending_move_to = Some(*point);
+                }
+                return out;
+            }
             ModeEvent::FinishRequested { .. } => {
                 if !self.finished {
                     self.finished = true;

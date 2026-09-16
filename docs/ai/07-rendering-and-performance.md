@@ -1,5 +1,7 @@
 # 覆盖层、帧同步与性能约束
 
+Window 五种模式的固定帮助计划在 registry::rebuild_tables 中预编译：解析有效绑定、temporary_mode_keys 与 Grid/Recursive Grid 入口、冲突和返回目标，生成平台按键显示名、语义分组、单/双栏行及静态列宽字符计数。普通 Window 提前生成 Move/Resize 两份（Resize 无 Other Actions），其他模式共享同一版本。模式进入、重入和 S 切换只选择 Arc 中的已有内容，不重新解析、分组或构造固定行；配置/应用覆盖变化重建计划。Restore 页码提示、窗口状态、屏幕/DPI 和锚点几何仍按当前状态更新，完整场景缓存继续复用。
+
 窗口身份卡片的引导线由共享 `window.card.guide_line_enabled/width/color` 控制；颜色在 WindowStyles 中按主题预编译。配置编译选择无引导线或有引导线的专用渲染入口；场景的可选 WindowAnnotations 表只保存一份启用时共享的 LabelConnectorStyle，关闭时不分配引导线条目；统一避让仅为显式启用的窗口卡片生成连接线，关闭线条不影响避让。普通 Hint/Grid 标签不携带窗口专用数据。
 
 快速切换面板通过 `presentation::label_scale` 使用平台布局比例：Windows 按当前屏幕 DPI 统一计算行距和列宽，并补偿原生 compact-label 的居中缩放；macOS 始终使用逻辑点，Retina backing scale 仅用于原生栅格化，不能用于面板尺寸或名称偏移。名称按比例字体估算宽度；打开时缓存最长和平均宽度，最长名称决定列宽，二者差值的八分之一用于将右侧留白转移到左侧，补偿较短行造成的视觉偏左。右侧至少保留原留白的四分之三，等长行不偏移，名称列始终左对齐；不在鼠标移动时重新扫描名称。数字沿用 Key Help 的灰色键帽，左右各保留字号 12% 的内边距，键帽列宽包含该内边距；名称保持透明无边框；Windows DPI 缩放保留零宽边框，不将其强制变为一像素。

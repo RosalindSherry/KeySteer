@@ -1,5 +1,9 @@
 # Release notes
 
+## 0.10.11
+
+- Window Move now supports Grid and Recursive Grid targeting, so you can precisely place windows across displays with your configured keyboard shortcuts.
+
 ## 0.10.10
 
 - Improved resource cleanup in Window mode on Windows and macOS.

@@ -179,6 +179,8 @@ canonical 输出必须能重新 parse。`press/release/toggle` 是合成输入�
 
 ## 继承和优先级
 
+编译有效表时，Window 额外借用 Normal（含继承）中指向 Grid/Recursive Grid 的空闲入口，在别名、应用覆盖之后、前缀索引之前完成；Window 已有或继承的同 chord 绑定（包括 none）优先。默认 G 可直接进入，F 的冲突保留最大化；Primary+G/F 继续走配置的临时 Normal 层。不存在独立窗口网格 DTO、复制网格参数或硬编码物理入口键。
+
 Engine 为每个 Mode 编译有效 keymap：
 
 1. 当前 Mode 本地绑定优先。

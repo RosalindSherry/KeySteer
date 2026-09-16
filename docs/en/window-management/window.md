@@ -29,6 +29,14 @@ By default, candidates are **non-minimized windows on the current display**. Exi
 
 Need to click something? Hold `Primary` to temporarily use Normal's pointer movement, scrolling, and click bindings. Release it to resume the same target. Each window mode has independent direction bindings; remapping Normal does not automatically remap these modes.
 
+## Move with grid targeting
+
+While Window is in Move state, Grid and Recursive Grid can run above the same locked window session. Defaults are `G` or `Primary+G` for Grid and `Primary+F` for Recursive Grid; bare `F` still maximizes.
+
+Entrances come from Normal's effective bindings. Compilation borrows unoccupied Grid/Recursive Grid entrances after aliases and application overrides, preserving existing Window bindings, including `none`. The temporary Normal layer keeps its configured entrances as well; no physical G/F keys are hardcoded.
+
+The actual modes retain their configuration, Tab/Backspace navigation, Space reset, cross-display path preservation, and completion behavior. Whenever the picker moves the pointer, the window center follows within the destination work area. Leaving for Normal/Idle resumes Window; `keep` continues targeting. One targeting session creates one window undo step.
+
 ## Audio controls
 
 These default combinations work in Window, Quick, and Editor. Hold `V` and press the partner key; add `Shift` for system controls.

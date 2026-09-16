@@ -62,6 +62,13 @@ impl Mode for WindowMode {
     fn wants_pointer_events(&self) -> bool {
         false
     }
+    fn accepts_window_targeting(&self) -> bool {
+        let session = self
+            .session
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.kind == WindowKind::Move && !session.size
+    }
     fn prepare_transition(
         &mut self,
         target: &ModeId,
@@ -172,6 +179,18 @@ impl Mode for WindowMode {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .available_keys()
+    }
+    fn claims_key_for_help(&self, key: &Key) -> bool {
+        key.as_char().is_some_and(|c| c.is_ascii_digit())
+            || (self.kind == WindowKind::Editor && key.as_str() == "`")
+            || (self.kind == WindowKind::Restore && matches!(key.as_str(), "page_up" | "page_down"))
+    }
+    fn fixed_key_help(&self) -> Vec<(String, String)> {
+        if self.kind == WindowKind::Editor {
+            vec![("`".into(), "Area number".into())]
+        } else {
+            Vec::new()
+        }
     }
     fn window_action_supported(&self, action: &W) -> bool {
         self.kind.supports_action(action)

@@ -4,6 +4,10 @@ Window 入口激活鼠标下窗口、可配置关闭动作见 [公共 API](02-ru
 
 # KeySteer 项目手册
 
+窗口固定帮助预编译、Move/Resize 双版本及跨会话共享见 [运行时/API](02-runtime-and-api.md) 和 [渲染性能](07-rendering-and-performance.md)。
+
+Window Move 上层网格定位、编译期入口避让和异步绝对移动见 [运行时/API](02-runtime-and-api.md)、[配置](03-configuration.md)、[模式](04-modes-and-lifecycle.md)、[原生后端](06-platform-backends.md) 和 [验证](08-build-docs-and-tests.md)。
+
 映射目标修饰键、源键状态恢复及长按重复见 [运行时](02-runtime-and-api.md)、[配置](03-configuration.md)、[原生后端](06-platform-backends.md) 与 [验证](08-build-docs-and-tests.md)。
 
 键盘映射长按跟随系统重复、前缀释放停止见 [运行时](02-runtime-and-api.md)、[配置](03-configuration.md) 与 [验证](08-build-docs-and-tests.md)。

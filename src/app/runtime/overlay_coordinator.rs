@@ -94,7 +94,7 @@ pub(super) struct DynamicOverlayState {
 pub(super) struct OverlayCoordinator {
     pub(super) key_help_visible: bool,
     pub(super) window_help_override: Option<bool>,
-    pub(super) window_help_plan: Option<super::key_help::WindowKeyHelpPlan>,
+    pub(super) window_help_plan: Option<Arc<super::key_help::WindowKeyHelpPlan>>,
     pub(super) key_help_cache: Option<Box<super::key_help::KeyHelpCache>>,
     pub(super) last_scene: Option<Arc<OverlayScene>>,
     pub(super) content: Option<Arc<OverlayScene>>,

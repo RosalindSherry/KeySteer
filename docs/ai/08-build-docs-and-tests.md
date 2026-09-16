@@ -1,5 +1,7 @@
 # 构建、打包、文档站与测试
 
+Window 固定帮助预编译：`window_help_is_precompiled_before_entry_and_reused_across_move_resize_and_reentry` 检查入口前准备、跨会话 Arc 复用与 Resize 隐藏 Other Actions；`precompiled_window_help_matches_dynamic_rendering` 对比单/双栏、Move/Resize 和 1/1.5/2 DPI 的完整场景。分配探针 `precompiled_window_help_allocation_comparison` 必须单线程运行 ignored 测试。2026-09-16 本机 debug 下，1920 宽/1 倍 DPI，当前动态回退构建与预编译消费分别为 Move 817→106、Resize 767→96 次分配；仅比较一次面板重建，不代表整程序延迟或旧版本基准。
+
 macOS `mapped_keyboard_events_*` 回归覆盖左右四类修饰键的全部非空组合、重复发送、
 目标左右修饰键的释放顺序、保留修饰键和逐事件 Caps Lock/NumericPad 属性。
 这些测试在 macOS target 下编译和执行；Windows 的交叉检查仅确认可编译，不能替代原生运行。
@@ -398,3 +400,6 @@ Window 卡片渲染回归额外从 TOML 分别编译 true／false／true，验�
 `window_scenes_match_pre_optimization_baseline` 对照提交 `c7bff963bef83a4a5a2ba67f1458e112e5ac6647` 实际生成的 1296 个 Windows 场景指纹，覆盖浅／深主题、引导线开关、1／5／16 窗口、双屏负坐标和混合 DPI、窗口底部／屏幕底部／屏幕中心位置、树布局及分组编号、重复避让与面板碰撞。比较全部绘制字段，只排除存储迁移的 placement／connector 元数据，浮点坐标以百万分之一像素规范化；基准 fixture 不能从待测实现自动更新。macOS 的紧凑标签物理几何不同，不运行 Windows fixture；跨平台逻辑测试验证任意角度起止点、静止线条不变和缓存一致性，macOS 仍需原生视觉验收。
 
 `window_help_cache_restores_connectors_with_displaced_labels` 验证缓存与重建一致，源线条变化导致失效；`ended_dissolved_session_preserves_undo_and_redo` 验证退出后仍能撤销解散、重做分组。不能通过删除历史或放宽分配门禁换取优化。
+# Window 上层定位回归
+
+runtime 的 window_targeting 测试覆盖无修饰和临时 Normal 入口、冲突/none/改键、原 Grid/Recursive Grid 的 Tab/Space、跨屏路径保留、自然完成返回、同窗口会话和迟到结果不覆盖上层。共享后端 targeting_move 测试覆盖不同 DPI 的跨屏绝对定位、不回放鼠标和整轮一次撤销。原生窗口的视觉跟随仍需 Windows/macOS 桌面验收。

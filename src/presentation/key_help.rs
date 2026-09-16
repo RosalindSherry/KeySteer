@@ -7,7 +7,85 @@ use std::collections::BTreeMap;
 mod ruler;
 mod window;
 
+#[derive(Clone)]
+pub(crate) struct PreparedWindowHelp {
+    columns: [PreparedHelpColumns; 2],
+    two_columns: bool,
+    modes: Vec<(String, String)>,
+    exit: String,
+    exit_label: String,
+}
+
+#[derive(Clone)]
+struct PreparedHelpColumns {
+    entries: Vec<(String, String)>,
+    key_lines: Vec<Vec<String>>,
+    action_lines: Vec<Vec<String>>,
+    char_counts: Vec<(usize, usize)>,
+}
+
+fn prepare_columns(entries: Vec<(String, String)>, columns: usize) -> PreparedHelpColumns {
+    let rows = entries.len().div_ceil(columns).max(1);
+    let char_counts = (0..columns)
+        .map(|column| {
+            entries.iter().skip(column * rows).take(rows).fold(
+                (1, 1),
+                |(keys, actions), (key, action)| {
+                    (
+                        keys.max(key.chars().count()),
+                        actions.max(action.chars().count()),
+                    )
+                },
+            )
+        })
+        .collect();
+    PreparedHelpColumns {
+        key_lines: entries.iter().map(|(key, _)| vec![key.clone()]).collect(),
+        action_lines: entries
+            .iter()
+            .map(|(_, action)| vec![action.clone()])
+            .collect(),
+        entries,
+        char_counts,
+    }
+}
+
+fn prepare_sections(sections: window::Sections) -> PreparedWindowHelp {
+    PreparedWindowHelp {
+        columns: [
+            prepare_columns(sections.clone().entries(1), 1),
+            prepare_columns(sections.clone().entries(2), 2),
+        ],
+        two_columns: !sections.left.is_empty() && !sections.right.is_empty(),
+        modes: sections.modes,
+        exit: sections.exit,
+        exit_label: sections.exit_label,
+    }
+}
+
+pub(crate) fn compile_window_help(
+    entries: &[String],
+    mode: &str,
+    return_target: Option<&str>,
+    resizing: bool,
+) -> PreparedWindowHelp {
+    let mut grouped = BTreeMap::<String, Vec<String>>::new();
+    for entry in entries {
+        if let Some((keys, action)) = entry.split_once("  ·  ") {
+            if action == "Window number" {
+                continue;
+            }
+            grouped
+                .entry(action.into())
+                .or_default()
+                .push(crate::api::input::display_key_chord(keys));
+        }
+    }
+    prepare_sections(window::sections(grouped, mode, return_target, resizing))
+}
+
 pub(crate) struct KeyHelpView<'a> {
+    pub prepared: Option<std::sync::Arc<PreparedWindowHelp>>,
     pub screen: &'a Screen,
     pub ui: &'a KeyHelp,
     pub palette: &'a Palette,
@@ -38,21 +116,28 @@ fn compose_columns(scene: &mut OverlayScene, input: KeyHelpView<'_>, max_columns
     );
     // Group equivalent actions instead of repeating a badge for every key.
     let mut grouped = BTreeMap::<String, Vec<String>>::new();
-    for entry in input.entries.iter().chain(&input.extra_entries) {
-        if let Some((keys, action)) = entry.split_once("  ·  ") {
-            if window_help && action == "Window number" {
-                continue;
+    if input.prepared.is_none() {
+        for entry in input.entries.iter().chain(&input.extra_entries) {
+            if let Some((keys, action)) = entry.split_once("  ·  ") {
+                if window_help && action == "Window number" {
+                    continue;
+                }
+                grouped
+                    .entry(action.into())
+                    .or_default()
+                    .push(crate::api::input::display_key_chord(keys));
             }
-            grouped
-                .entry(action.into())
-                .or_default()
-                .push(crate::api::input::display_key_chord(keys));
         }
     }
-    let (mut entries, sections) = if window_help {
+    let (mut entries, sections) = if let Some(prepared) = &input.prepared {
         (
-            Vec::new(),
-            Some(window::sections(
+            std::borrow::Cow::Borrowed(&[][..]),
+            Some(std::borrow::Cow::Borrowed(prepared.as_ref())),
+        )
+    } else if window_help {
+        (
+            std::borrow::Cow::Owned(Vec::new()),
+            Some(std::borrow::Cow::Owned(prepare_sections(window::sections(
                 grouped,
                 &input.display_name,
                 input.return_target.as_deref(),
@@ -60,7 +145,7 @@ fn compose_columns(scene: &mut OverlayScene, input: KeyHelpView<'_>, max_columns
                     .detail
                     .as_deref()
                     .is_some_and(|detail| detail.starts_with("Resize")),
-            )),
+            )))),
         )
     } else {
         let mut entries: Vec<_> = grouped
@@ -68,7 +153,7 @@ fn compose_columns(scene: &mut OverlayScene, input: KeyHelpView<'_>, max_columns
             .map(|(action, keys)| (keys.join(" / "), action))
             .collect();
         entries.sort_by(|left, right| left.0.cmp(&right.0));
-        (entries, None)
+        (std::borrow::Cow::Owned(entries), None)
     };
     let exit_action = sections
         .as_ref()
@@ -106,17 +191,13 @@ fn compose_columns(scene: &mut OverlayScene, input: KeyHelpView<'_>, max_columns
     let column_gap = if window_help { 20.0 } else { 6.0 } * scale;
     let key_gap = 8.0 * scale;
     let key_padding = if window_help { 2.0 } else { 5.0 };
-    let columns = if let Some(sections) = sections {
-        let count = if max_columns > 1
-            && available_width >= 620.0 * scale
-            && !sections.left.is_empty()
-            && !sections.right.is_empty()
-        {
+    let columns = if let Some(sections) = sections.as_ref() {
+        let count = if max_columns > 1 && available_width >= 620.0 * scale && sections.two_columns {
             2
         } else {
             1
         };
-        entries = sections.entries(count);
+        entries = std::borrow::Cow::Borrowed(&sections.columns[count - 1].entries);
         count
     } else if available_width >= 560.0 * scale && entries.len() > 8 {
         2
@@ -128,13 +209,20 @@ fn compose_columns(scene: &mut OverlayScene, input: KeyHelpView<'_>, max_columns
     // reserving half of a fixed-width panel for each side of every row.
     let mut widths = Vec::with_capacity(columns);
     for column in 0..columns {
-        let chunk = entries.iter().skip(column * rows).take(rows);
-        let (key_chars, action_chars) = chunk.fold((1, 1), |(keys, actions), (key, action)| {
-            (
-                keys.max(key.chars().count()),
-                actions.max(action.chars().count()),
-            )
-        });
+        let (key_chars, action_chars) = sections.as_ref().map_or_else(
+            || {
+                entries.iter().skip(column * rows).take(rows).fold(
+                    (1, 1),
+                    |(keys, actions), (key, action)| {
+                        (
+                            keys.max(key.chars().count()),
+                            actions.max(action.chars().count()),
+                        )
+                    },
+                )
+            },
+            |sections| sections.columns[columns - 1].char_counts[column],
+        );
         widths.push((
             (key_chars as f64 * ui.font_size * 0.75 + key_padding * 2.0) * scale,
             (action_chars as f64 * ui.font_size * 0.75 + ui.font_size * 0.5) * scale,
@@ -258,11 +346,23 @@ fn compose_columns(scene: &mut OverlayScene, input: KeyHelpView<'_>, max_columns
         .enumerate()
         .map(|(index, _)| widths[index / rows])
         .collect();
-    let key_lines: Vec<Vec<String>> = entries.iter().map(|(keys, _)| vec![keys.clone()]).collect();
-    let action_lines: Vec<Vec<String>> = entries
-        .iter()
-        .map(|(_, action)| vec![action.clone()])
-        .collect();
+    let key_lines: std::borrow::Cow<'_, [Vec<String>]> = sections.as_ref().map_or_else(
+        || std::borrow::Cow::Owned(entries.iter().map(|(keys, _)| vec![keys.clone()]).collect()),
+        |sections| std::borrow::Cow::Borrowed(sections.columns[columns - 1].key_lines.as_slice()),
+    );
+    let action_lines: std::borrow::Cow<'_, [Vec<String>]> = sections.as_ref().map_or_else(
+        || {
+            std::borrow::Cow::Owned(
+                entries
+                    .iter()
+                    .map(|(_, action)| vec![action.clone()])
+                    .collect(),
+            )
+        },
+        |sections| {
+            std::borrow::Cow::Borrowed(sections.columns[columns - 1].action_lines.as_slice())
+        },
+    );
     let previews = input.previews;
     let preview_rows = previews.len().div_ceil(3);
     let preview_height = (preview_rows as f64 * 56.0 * scale).min(area.height * 0.35);
@@ -738,7 +838,7 @@ fn compose_columns(scene: &mut OverlayScene, input: KeyHelpView<'_>, max_columns
         .sum::<f64>()
         + (columns - 1) as f64 * column_gap;
     let body_left = panel.x + (panel.width - body_width) / 2.0;
-    for (index, (keys, _action)) in entries.into_iter().enumerate() {
+    for (index, (keys, _action)) in entries.iter().enumerate() {
         // Read down each column, with one consistent left edge per column.
         let column = index / rows;
         let (key_width, action_width) = entry_widths[index];
@@ -882,6 +982,7 @@ fn window_action_label(action: &str) -> Option<&'static str> {
         "idle" => "Idle",
         "normal" => "Normal",
         "grid" => "Grid",
+        "recursive_grid" => "Recursive Grid",
         "window_save_layout" => "Save layout",
         "Area number" => "Area number prefix",
         "window_layout_left" => "Layout left",
@@ -1002,6 +1103,80 @@ pub(crate) fn push_sized_shared_help_text(
 mod tests {
     use super::*;
 
+    fn compare_prepared_window_help(width: f64, scale: f64, resizing: bool) -> (usize, usize) {
+        let config = crate::config::Config::default();
+        let mut entries: Vec<String> = config
+            .window
+            .bindings
+            .iter()
+            .map(|(key, action)| format!("{key}  ·  {}", action.canonical()))
+            .collect();
+        entries.extend(["g  ·  grid".into(), "ctrl+f  ·  recursive_grid".into()]);
+        let prepared = std::sync::Arc::new(compile_window_help(
+            &entries,
+            "window",
+            Some("idle"),
+            resizing,
+        ));
+        let entries: std::sync::Arc<[String]> = entries.into();
+        let screen = Screen {
+            bounds: Rect::new(0.0, 0.0, width, 1200.0),
+            work_area: Rect::new(0.0, 0.0, width, 1160.0),
+            scale,
+            is_primary: true,
+            name: None,
+        };
+        let ui = KeyHelp::default();
+        let palette = Palette::default();
+        let render = |compiled: bool| {
+            let mut scene = OverlayScene::new();
+            let view = KeyHelpView {
+                prepared: compiled.then(|| prepared.clone()),
+                screen: &screen,
+                ui: &ui,
+                palette: &palette,
+                entries: entries.clone(),
+                extra_entries: Vec::new(),
+                return_target: Some("idle".into()),
+                window_help: true,
+                display_name: "window".into(),
+                ruler: None,
+                previews: Vec::new(),
+                detail: Some(if resizing { "Resize" } else { "Move" }.into()),
+                anchor: None,
+                indicator_style: None,
+            };
+            let region = stats_alloc::Region::new(crate::TEST_ALLOCATOR);
+            compose(&mut scene, view);
+            (scene, region.change().allocations)
+        };
+        let (reference, before) = render(false);
+        let (compiled, after) = render(true);
+        assert_eq!(reference, compiled);
+        (before, after)
+    }
+
+    #[test]
+    fn precompiled_window_help_matches_dynamic_rendering() {
+        for width in [520.0, 1920.0] {
+            for scale in [1.0, 1.5, 2.0] {
+                for resizing in [false, true] {
+                    compare_prepared_window_help(width, scale, resizing);
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "allocation counter requires --test-threads=1"]
+    fn precompiled_window_help_allocation_comparison() {
+        for resizing in [false, true] {
+            let (before, after) = compare_prepared_window_help(1920.0, 1.0, resizing);
+            eprintln!("resizing={resizing}: allocations {before} -> {after}");
+            assert!(after < before);
+        }
+    }
+
     #[test]
     fn window_help_fits_inside_target_or_visible_work_area_at_multiple_scales() {
         for scale in [1.0, 1.5, 2.0] {
@@ -1020,6 +1195,7 @@ mod tests {
                 compose(
                     &mut scene,
                     KeyHelpView {
+                        prepared: None,
                         screen: &screen,
                         ui: &KeyHelp::default(),
                         palette: &Palette::default(),

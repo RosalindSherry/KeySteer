@@ -27,8 +27,9 @@ pub(super) struct KeyHelpCache {
 }
 
 pub(super) struct WindowKeyHelpPlan {
+    pub(super) presentations: [Arc<crate::presentation::key_help::PreparedWindowHelp>; 2],
     pub(super) entries: Arc<[String]>,
-    return_target: Option<String>,
+    pub(super) return_target: Option<String>,
 }
 
 impl KeyHelpCache {
@@ -171,24 +172,12 @@ impl Engine {
         matches!(self.registry.active.as_str(), "window_restore")
     }
 
-    fn new_window_help_plan(&self) -> WindowKeyHelpPlan {
-        let mut entries = self.configured_key_help_entries(true);
-        if !self.window_library_help() {
-            entries.extend(self.extra_key_help_entries(true));
-        }
-        let return_target = self.key_help_return_target(&entries);
-        WindowKeyHelpPlan {
-            entries: entries.into(),
-            return_target,
-        }
-    }
-
     pub(super) fn key_help_entries(&self) -> Vec<String> {
         let mut entries = if self.registry.active.is_window() {
-            self.overlay.window_help_plan.as_ref().map_or_else(
-                || self.new_window_help_plan().entries.to_vec(),
-                |plan| plan.entries.to_vec(),
-            )
+            self.registry
+                .window_help_plans
+                .get(&self.registry.active)
+                .map_or_else(Vec::new, |plan| plan.entries.to_vec())
         } else {
             self.configured_key_help_entries(false)
         };
@@ -209,7 +198,11 @@ impl Engine {
             return;
         }
         if self.registry.active.is_window() && self.overlay.window_help_plan.is_none() {
-            self.overlay.window_help_plan = Some(self.new_window_help_plan());
+            self.overlay.window_help_plan = self
+                .registry
+                .window_help_plans
+                .get(&self.registry.active)
+                .cloned();
         }
         let Some(screen) = self.help_screen() else {
             self.overlay.key_help_cache = None;
@@ -272,15 +265,25 @@ impl Engine {
 
     fn key_help_return_target(&self, entries: &[String]) -> Option<String> {
         let display_mode = self.display_mode();
-        self.registry.table(&display_mode).and_then(|table| {
+        self.key_help_return_target_in(&display_mode, entries)
+    }
+
+    pub(super) fn key_help_return_target_in(
+        &self,
+        display_mode: &ModeId,
+        entries: &[String],
+    ) -> Option<String> {
+        self.registry.table(display_mode).and_then(|table| {
             table
                 .iter_entries()
                 .filter_map(|entry| {
                     let Binding::Mode(target) = entry.binding.as_ref() else {
                         return None;
                     };
-                    if target == &display_mode
+                    if target == display_mode
                         || (target.is_window() && target != &ModeId::window())
+                        || (*display_mode == ModeId::window()
+                            && (*target == ModeId::grid() || *target == ModeId::recursive_grid()))
                     {
                         return None;
                     }
@@ -328,6 +331,16 @@ impl Engine {
         crate::presentation::key_help::compose(
             scene,
             crate::presentation::key_help::KeyHelpView {
+                prepared: self
+                    .overlay
+                    .window_help_plan
+                    .as_ref()
+                    .filter(|_| !self.window_library_help())
+                    .map(|plan| {
+                        let resizing = display_mode == ModeId::window()
+                            && mode.is_some_and(|mode| !mode.accepts_window_targeting());
+                        Arc::clone(&plan.presentations[usize::from(resizing)])
+                    }),
                 screen,
                 ui: &self.settings.key_help,
                 palette: &self.palette,

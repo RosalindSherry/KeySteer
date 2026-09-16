@@ -753,6 +753,11 @@ pub trait Mode: Send {
         self.handle(&event, ctx)
     }
 
+    /// Whether grid targeting can be layered over this window move session.
+    fn accepts_window_targeting(&self) -> bool {
+        false
+    }
+
     /// Whether this mode wants exclusive use of the keyboard. When true the
     /// host swallows keys instead of passing them to the focused app — which
     /// is what grid and hint modes need, and idle does not.
@@ -764,6 +769,16 @@ pub trait Mode: Send {
     /// input alphabet.
     fn claims_key(&self, _key: &Key) -> bool {
         false
+    }
+
+    /// State-independent raw-key ownership for precompiled help.
+    fn claims_key_for_help(&self, key: &Key) -> bool {
+        self.claims_key(key)
+    }
+
+    /// Fixed built-in hints that can be compiled with the binding tables.
+    fn fixed_key_help(&self) -> Vec<(String, String)> {
+        Vec::new()
     }
 
     /// Whether a window operation is meaningful in the current interaction.

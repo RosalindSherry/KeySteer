@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 
 type Entry = (String, String);
 
+#[derive(Clone)]
 pub(super) struct Sections {
     pub left: Vec<Entry>,
     pub right: Vec<Entry>,
@@ -334,18 +335,20 @@ pub(super) fn sections(
     let mut left = Vec::new();
     let title = "ACTIONS";
     section(&mut left, title, operations);
-    let other = actions
-        .into_iter()
-        .map(|(action, keys)| {
-            (
-                keys.join(" / "),
-                super::window_action_label(&action)
-                    .unwrap_or(&action)
-                    .into(),
-            )
-        })
-        .collect();
-    section(&mut left, "OTHER ACTIONS", other);
+    if !resizing {
+        let other = actions
+            .into_iter()
+            .map(|(action, keys)| {
+                (
+                    keys.join(" / "),
+                    super::window_action_label(&action)
+                        .unwrap_or(&action)
+                        .into(),
+                )
+            })
+            .collect();
+        section(&mut left, "OTHER ACTIONS", other);
+    }
     let mut right = Vec::new();
     section(&mut right, "COMMON", common);
     Sections {

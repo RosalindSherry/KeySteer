@@ -209,6 +209,11 @@ impl WindowSession {
             }
         }
         self.rebuild_numbers();
+        if self.target.is_some()
+            && let Some(point) = self.pending_move_to.take()
+        {
+            self.adjust(WindowChange::MoveTo(point), &mut out);
+        }
         if self.kind == WindowKind::Tab {
             self.tab_result(result.id, ctx, &mut out);
             changed = true;

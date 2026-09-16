@@ -563,6 +563,10 @@ impl WindowWorker {
             && ga == gb
         {
             let merged = match (ca, cb) {
+                (WindowChange::MoveTo(a), WindowChange::MoveTo(b)) => {
+                    *a = *b;
+                    true
+                }
                 (WindowChange::Move { dx: ax, dy: ay }, WindowChange::Move { dx: bx, dy: by }) => {
                     *ax += bx;
                     *ay += by;
@@ -1510,7 +1514,9 @@ impl Session {
                 // Continuous geometry must not replay a stale cursor position.
                 let pointer = (!matches!(
                     change,
-                    WindowChange::Move { .. } | WindowChange::Resize { .. }
+                    WindowChange::Move { .. }
+                        | WindowChange::MoveTo(_)
+                        | WindowChange::Resize { .. }
                 ))
                 .then(|| access.pointer().ok())
                 .flatten();
@@ -1526,6 +1532,22 @@ impl Session {
                     }
                     change => {
                         let next = match change {
+                            WindowChange::MoveTo(point) => {
+                                let destination = screens
+                                    .iter()
+                                    .find(|screen| screen.bounds.contains(&point))
+                                    .ok_or("target display is unavailable")?;
+                                self.move_remainder = None;
+                                geometry::constrain_move(
+                                    Rect::new(
+                                        point.x - base.width / 2.0,
+                                        point.y - base.height / 2.0,
+                                        base.width,
+                                        base.height,
+                                    ),
+                                    destination.work_area,
+                                )
+                            }
                             WindowChange::Move { dx, dy } => {
                                 let remainder = self
                                     .move_remainder
@@ -2304,6 +2326,25 @@ mod tests {
             change,
             group,
         }
+    }
+
+    #[test]
+    fn targeting_move_crosses_screens_without_pointer_feedback_and_undoes_once() {
+        let mut access = Fake::new(1);
+        let mut session = Session::default();
+        let original = access.windows[&WindowId(1)].clone();
+        for point in [Point::new(-600.0, 400.0), Point::new(500.0, 400.0)] {
+            let result = run(
+                &mut session,
+                &mut access,
+                adjust(1, WindowChange::MoveTo(point)),
+            );
+            assert_eq!(result.changed, 1);
+            assert!(result.pointer.is_none());
+            assert_eq!(access.windows[&WindowId(1)].info.bounds.center(), point);
+        }
+        run(&mut session, &mut access, WindowOperation::Undo);
+        assert!(same_placement(&access.windows[&WindowId(1)], &original));
     }
 
     #[test]

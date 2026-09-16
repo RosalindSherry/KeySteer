@@ -345,6 +345,11 @@ impl Mode for RecursiveGridMode {
 
     fn handle(&mut self, event: &ModeEvent, ctx: &HostContext<'_>) -> CommandBatch {
         match event {
+            ModeEvent::Pushed { previous } => {
+                self.session.return_mode = previous.clone();
+                self.reset(ctx.active_bounds());
+                self.redraw(ctx)
+            }
             ModeEvent::Activated { previous } => {
                 self.session.return_mode = previous.clone().unwrap_or_else(ModeId::idle);
                 self.reset(ctx.active_bounds());

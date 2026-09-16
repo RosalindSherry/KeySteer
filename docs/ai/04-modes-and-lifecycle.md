@@ -149,6 +149,8 @@ double-click 成功后生成。普通 click 仍在物理键按下沿原子执行
 
 ## return mode 与 modal mode
 
+Window Move 的 Grid/Recursive Grid 入口走 PushMode/Suspended，直接运行注册的网格实例并发送 Pushed；两种网格的 Pushed 与 Activated 使用相同初始化。底层窗口停止连续移动并开启同一撤销 group，保留目标和 session。网格 keep/restart/跨屏/临时 Normal 逻辑不变；切往 Normal、Idle 或 Window 时 Pop/Resumed 返回底层，切往其他模式先恢复底层再正常交接。异步窗口回执仍交给原 owner，但暂停时不发布窗口覆盖层或旧指针位置。输入恢复同时清理暂停的 owner。
+
 - 普通 `SwitchMode` 会让新 Mode 在 `Activated { previous }` 中记录 return mode。
 - `return` 生命周期动作回到该记录值，不等同硬编码 Normal。
 - `PushMode` 将当前 Mode 放入 modal stack，发送 `Suspended`；关闭后 `PopMode` 发送

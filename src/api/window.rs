@@ -243,9 +243,20 @@ impl WindowAction {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum WindowChange {
-    Move { dx: f64, dy: f64 },
-    Resize { dw: f64, dh: f64 },
-    Place { index: usize, gap: f64 },
+    /// Place the window center at an absolute targeting position without warping the pointer.
+    MoveTo(Point),
+    Move {
+        dx: f64,
+        dy: f64,
+    },
+    Resize {
+        dw: f64,
+        dh: f64,
+    },
+    Place {
+        index: usize,
+        gap: f64,
+    },
     Center,
     CycleState,
     Screen(WindowScreenTarget),

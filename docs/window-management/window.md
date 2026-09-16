@@ -29,6 +29,14 @@ import ModeVideo from '../.vitepress/components/ModeVideo'
 
 需要点击一下应用？按住 `Primary` 临时使用 Normal 的鼠标移动、滚动和点击绑定，松开后继续调整原目标。Window 各模式的方向键独立配置，修改 Normal 的方向键不会自动修改这里的键位。
 
+## 用网格快速移动
+
+Window 的 Move 状态可以在上层激活真正的 Grid 或 Recursive Grid，底层仍锁定同一个窗口。默认 `G` 或 `Primary+G` 进入 Grid，`Primary+F` 进入 Recursive Grid；裸 `F` 保留最大化操作。
+
+入口来自 Normal 的有效配置：编译时将指向这两个模式且不与 Window 绑定冲突的入口补入 Window；已有绑定（包括 `none`）优先。修改 Normal 的入口、别名或应用覆盖后会重新计算，临时 Normal 的入口也沿用其配置，不固定为 G/F。
+
+上层完整沿用原模式的网格、Tab／Backspace 回退、Space 重置、跨屏路径保留及完成配置。网格实际移动鼠标时，窗口中心跟随定位点，边缘受目标屏幕工作区约束。退出到 Normal／Idle 或自然完成返回时回到 Window；`keep` 则继续定位。一轮定位共享一次窗口撤销记录。
+
 ## 音频控制
 
 以下默认组合键在 Window、Quick 和 Editor 中可用。按住 `V` 再按对应键；系统操作额外按住 `Shift`。

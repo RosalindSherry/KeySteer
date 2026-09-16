@@ -1,5 +1,11 @@
 # 更新日志 / Release Notes
 
+## 0.10.11
+
+- Window 移动现在支持 Grid 和 Recursive Grid 精确定位窗口，可使用已配置的快捷键在不同屏幕间快速放置窗口。
+
+- Window Move now supports Grid and Recursive Grid targeting, so you can precisely place windows across displays with your configured keyboard shortcuts.
+
 ## 0.10.10
 
 - 优化 Windows 和 macOS 的 Window 模式资源回收。
