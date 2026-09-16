@@ -1,5 +1,11 @@
 # 更新日志 / Release Notes
 
+## 0.10.16
+
+- 优化相交窗口切换（`window_overlap_next` / `window_overlap_previous`），减少重复计算。
+
+- Improved overlapping-window switching (`window_overlap_next` / `window_overlap_previous`) with less repeated work.
+
 ## 0.10.15
 
 - 新增可配置的 `window_overlap_next` / `window_overlap_previous`，可在 Normal 模式中只切换到与当前窗口有重叠的窗口，并将鼠标移到目标窗口中心。

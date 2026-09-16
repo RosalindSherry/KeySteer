@@ -394,6 +394,11 @@ impl Backend for MacOsBackend {
             worker.cancel_audio(session);
         }
     }
+    fn clear_window_overlap_cache(&mut self) {
+        if let Some(worker) = &self.window_worker {
+            worker.clear_overlap_cache();
+        }
+    }
     fn request_window(&mut self, request: crate::api::window::WindowRequest) -> Result<(), String> {
         if self.window_worker.is_none() {
             let tx = self.event_tx.clone();

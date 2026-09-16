@@ -1,5 +1,7 @@
 # 核心运行时与公共 API
 
+相交切换能力在配置编译时由已启用模式的绑定、应用覆盖和嵌套动作序列推导为 EngineSettings.window_overlap_enabled；无相关绑定时不发送相交请求。Session 只保留可空缓存指针，首次相交请求才分配缓存，普通窗口/音频路径不创建相交状态。运行时配置重载从启用变为禁用时，Backend::clear_window_overlap_cache 仅通知已有 worker：丢弃待执行相交请求，在 worker 中释放缓存；不启动新 worker。几何仍按实际操作时的系统数据核对。
+
 直接 `Binding::Send` 通过 `repeats_on_key_down` 保留首次解析的 active gesture，并响应原生重复
 事件；它不属于 `is_held`，不持有输出键，也不创建 timer。重复解析要求原 owner 和编译 binding
 身份仍一致，避免前缀释放后切换到另一个同输出映射；字符绑定沿用字符优先解析。释放只清理 gesture。

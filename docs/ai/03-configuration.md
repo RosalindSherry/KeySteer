@@ -1,5 +1,7 @@
 # 配置、按键和持久化
 
+相交切换能力在配置编译时由已启用模式的绑定、应用覆盖和嵌套动作序列推导为 EngineSettings.window_overlap_enabled；无相关绑定时不发送相交请求。Session 只保留可空缓存指针，首次相交请求才分配缓存，普通窗口/音频路径不创建相交状态。运行时配置重载从启用变为禁用时，Backend::clear_window_overlap_cache 仅通知已有 worker：丢弃待执行相交请求，在 worker 中释放缓存；不启动新 worker。几何仍按实际操作时的系统数据核对。
+
 `[mode_usage].save_after_entries` 默认 100，必须是正 u32；不再使用分钟间隔。每次实际模式转换累计一次，工作区修改和正常退出也保存。workspace.ksw 的 v2 在 v1 预设记录后添加最多 256 条模式名与 u64 进入次数；v1 仍可读取，无统计时仍导出 v1。浏览器用十进制字符串保存 u64，避免 JS Number 精度丢失。
 
 `[quick_switch]` 默认 enabled=true、key="q"、hold_ms=350、blacklist=["idle"]、position="mouse"；位置另支持 screen/window。`ui` 使用 LabelUi 字号、字体、圆角、内边距、边框及可选主题颜色，浅深两份样式在加载时编译。黑名单仅限制面板，不禁止原快捷键。完整配置导出和网页统计／配置编辑同步支持这两个配置段。

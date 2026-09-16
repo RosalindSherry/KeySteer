@@ -970,6 +970,9 @@ impl Engine {
         backend.dismiss()?;
         self.overlay.reset();
 
+        if self.settings.window_overlap_enabled && !settings.window_overlap_enabled {
+            backend.clear_window_overlap_cache();
+        }
         self.settings = settings;
         self.quick_switch.pending = None;
         self.palettes = palettes;
@@ -1677,6 +1680,9 @@ impl Engine {
                 Command::CycleWindow { backwards }
                 | Command::CycleOverlappingWindow { backwards } => {
                     let operation = if matches!(command, Command::CycleOverlappingWindow { .. }) {
+                        if !self.settings.window_overlap_enabled {
+                            continue;
+                        }
                         crate::api::window::WindowOperation::CycleOverlapping { backwards }
                     } else {
                         crate::api::window::WindowOperation::CycleActive { backwards }

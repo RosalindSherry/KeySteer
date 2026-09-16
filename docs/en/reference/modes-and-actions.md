@@ -252,7 +252,7 @@ of the window under the pointer (foreground fallback). If A overlaps B and B ove
 Existing Tabs groups take priority in their tab order, followed by the remaining global candidates.
 Candidates outside the component are skipped in the requested direction. If the entire ring has no
 other component member, focus and pointer remain unchanged; there is no fallback outside the component.
-The component is recomputed from fresh window geometry on each step; minimized windows cannot connect components.
+Each step checks fresh window geometry, reusing the component while unchanged and recomputing when needed; minimized windows cannot connect components.
 The pointer follows the activated window's center; no Window mode or window labels appear.
 
 ```toml

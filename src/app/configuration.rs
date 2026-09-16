@@ -170,6 +170,13 @@ impl Engine {
 }
 
 pub fn compile(config: &ConfigFile) -> Result<RuntimePlan, String> {
+    fn uses_overlap(binding: &crate::api::Binding) -> bool {
+        match binding {
+            crate::api::Binding::ActivateOverlappingWindow { .. } => true,
+            crate::api::Binding::Sequence(actions) => actions.iter().any(uses_overlap),
+            _ => false,
+        }
+    }
     config.validate().map_err(|error| error.to_string())?;
 
     let mut specs = super::mode_catalog::built_in_specs(config)?;
@@ -183,6 +190,18 @@ pub fn compile(config: &ConfigFile) -> Result<RuntimePlan, String> {
 
     Ok(RuntimePlan {
         settings: EngineSettings {
+            window_overlap_enabled: specs.iter().any(|spec| {
+                spec.route
+                    .bindings
+                    .values()
+                    .chain(
+                        spec.route
+                            .app_overrides
+                            .iter()
+                            .flat_map(|route| route.bindings.values()),
+                    )
+                    .any(uses_overlap)
+            }),
             debug: DebugSettings {
                 enabled: config.debug.enabled,
                 keys: config.debug.keys,
@@ -239,6 +258,29 @@ mod tests {
     use super::*;
     use crate::api::ModeId;
     use crate::config::{AppOverride, Bindings};
+
+    #[test]
+    fn overlap_capability_is_compiled_from_enabled_routes_and_sequences() {
+        use crate::api::Binding;
+        let mut config = ConfigFile::default();
+        assert!(!compile(&config).unwrap().settings.window_overlap_enabled);
+        config.grid.bindings.insert(
+            "x".into(),
+            Binding::ActivateOverlappingWindow { backwards: false },
+        );
+        assert!(compile(&config).unwrap().settings.window_overlap_enabled);
+        config.grid.enabled = false;
+        assert!(!compile(&config).unwrap().settings.window_overlap_enabled);
+        config.normal.app_configs.push(AppOverride {
+            bundle_id: "example".into(),
+            bindings: [(
+                "c".into(),
+                Binding::Sequence(vec![Binding::ActivateOverlappingWindow { backwards: true }]),
+            )]
+            .into(),
+        });
+        assert!(compile(&config).unwrap().settings.window_overlap_enabled);
+    }
 
     #[test]
     fn compiles_unique_catalog_and_enable_flags() {

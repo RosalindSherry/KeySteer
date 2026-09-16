@@ -1,7 +1,7 @@
 //! Lazy, bounded window-operation worker. Native references are created and
 //! released on its thread; only API values enter the engine's event queue.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -20,33 +20,97 @@ pub(crate) struct Snapshot {
     pub restored: Rect,
 }
 
-/// Flood-fill the fresh inventory without querying native geometry per edge.
-fn overlapping_component(
-    windows: &[WindowInfo],
-    anchor: Option<WindowId>,
-    cancelled: &dyn Fn() -> bool,
-) -> HashSet<WindowId> {
-    let mut members = HashSet::new();
-    let Some(start) = windows.iter().position(|window| Some(window.id) == anchor) else {
-        return members;
-    };
-    let mut queue = vec![start];
-    members.insert(windows[start].id);
-    let mut head = 0;
-    while head < queue.len() {
-        if cancelled() {
-            return HashSet::new();
+/// Cache only geometry and identity: activation's Z-order changes do not alter
+/// connectivity. All scratch storage survives successive worker requests.
+#[derive(Default)]
+struct OverlapCache {
+    inventory: Vec<(WindowId, Rect)>,
+    members: Vec<WindowId>,
+    queue: Vec<usize>,
+    #[cfg(test)]
+    comparisons: usize,
+}
+
+impl OverlapCache {
+    fn contains(&self, id: WindowId) -> bool {
+        self.members.binary_search(&id).is_ok()
+    }
+
+    fn prepare(
+        &mut self,
+        windows: &[WindowInfo],
+        anchor: Option<WindowId>,
+        cancelled: &dyn Fn() -> bool,
+    ) {
+        // Validate every live rectangle, including windows outside the cached
+        // component: moving one of those can create a new connecting bridge.
+        let changed = windows.len() != self.inventory.len()
+            || windows.iter().any(|window| {
+                self.inventory
+                    .binary_search_by_key(&window.id, |&(id, _)| id)
+                    .ok()
+                    .is_none_or(|index| self.inventory[index].1 != window.bounds)
+            });
+        if changed {
+            self.inventory.clear();
+            self.inventory
+                .extend(windows.iter().map(|w| (w.id, w.bounds)));
+            self.inventory.sort_unstable_by_key(|&(id, _)| id);
+            self.members.clear();
+            self.queue.clear();
+            // Do not retain a historic peak after most windows have closed.
+            // Hysteresis avoids reallocating for ordinary small fluctuations.
+            fn trim<T>(buffer: &mut Vec<T>, count: usize) {
+                if buffer.capacity() > count.saturating_mul(4).max(64) {
+                    buffer.shrink_to(count.saturating_mul(2));
+                }
+            }
+            trim(&mut self.inventory, windows.len());
+            trim(&mut self.members, windows.len());
+            trim(&mut self.queue, windows.len());
         }
-        let bounds = windows[queue[head]].bounds;
-        head += 1;
-        for (index, window) in windows.iter().enumerate() {
-            if !members.contains(&window.id) && bounds.intersect(&window.bounds).is_some() {
-                members.insert(window.id);
-                queue.push(index);
+        if anchor.is_some_and(|id| self.contains(id)) {
+            return;
+        }
+        self.members.clear();
+        let Some(start) =
+            anchor.and_then(|id| self.inventory.binary_search_by_key(&id, |&(id, _)| id).ok())
+        else {
+            return;
+        };
+        self.queue.clear();
+        self.queue.extend(0..self.inventory.len());
+        self.queue.swap(0, start);
+        // One array holds both the discovered prefix and the unvisited suffix.
+        let mut discovered = 1;
+        let mut head = 0;
+        while head < discovered && discovered < self.queue.len() {
+            if cancelled() {
+                // Never publish a partial component as a reusable cache hit.
+                return;
+            }
+            let bounds = self.inventory[self.queue[head]].1;
+            head += 1;
+            let unvisited_start = discovered;
+            for i in unvisited_start..self.queue.len() {
+                let index = self.queue[i];
+                #[cfg(test)]
+                {
+                    self.comparisons += 1;
+                }
+                if bounds.intersect(&self.inventory[index].1).is_some() {
+                    self.queue.swap(i, discovered);
+                    discovered += 1;
+                }
             }
         }
+        self.members.extend(
+            self.queue[..discovered]
+                .iter()
+                .map(|&i| self.inventory[i].0),
+        );
+        self.members.sort_unstable();
     }
-    members
 }
 
 pub(crate) trait WindowAccess {
@@ -267,6 +331,7 @@ pub(crate) trait WindowAccess {
 }
 
 enum Pending {
+    ClearOverlap,
     Window {
         request: WindowRequest,
         screens: Vec<Screen>,
@@ -277,7 +342,7 @@ impl Pending {
     fn operation(&self) -> Option<&WindowOperation> {
         match self {
             Self::Window { request, .. } => Some(&request.operation),
-            Self::Audio(..) => None,
+            Self::Audio(..) | Self::ClearOverlap => None,
         }
     }
 }
@@ -328,6 +393,17 @@ pub(crate) struct WindowWorker {
 }
 
 impl WindowWorker {
+    pub(crate) fn clear_overlap_cache(&self) {
+        let mut queue = self.mailbox.queue.lock().unwrap_or_else(|e| e.into_inner());
+        queue.retain(|pending| {
+            !matches!(
+                pending.operation(),
+                Some(WindowOperation::CycleOverlapping { .. })
+            ) && !matches!(pending, Pending::ClearOverlap)
+        });
+        queue.push_back(Pending::ClearOverlap);
+        self.mailbox.notify();
+    }
     pub(crate) fn start<A: WindowAccess + 'static>(
         create: impl FnOnce() -> A + Send + 'static,
         emit: impl Fn(BackendEvent) + Send + Sync + 'static,
@@ -448,6 +524,11 @@ impl WindowWorker {
                                 }
                                 return;
                             }
+                            Pending::ClearOverlap => {
+                                focus_cycle.overlap = None;
+                                session.overlap = None;
+                                return;
+                            }
                             Pending::Window { request, screens } => (request, screens),
                         };
                         if request.operation.is_standalone_cycle() {
@@ -551,7 +632,7 @@ impl WindowWorker {
                 .store(request.session, Ordering::Release);
             self.mailbox.cancel_before.store(0, Ordering::Release);
             self.mailbox.query_before.store(0, Ordering::Release);
-            queue.retain(|p| matches!(p, Pending::Audio(..)));
+            queue.retain(|p| matches!(p, Pending::Audio(..) | Pending::ClearOverlap));
         }
         if self.mailbox.session.load(Ordering::Acquire) != request.session {
             return Err("window session expired".into());
@@ -567,7 +648,7 @@ impl WindowWorker {
                 .cancel_before
                 .store(request.id, Ordering::Release);
             queue.retain(|p| {
-                matches!(p, Pending::Audio(..))
+                matches!(p, Pending::Audio(..) | Pending::ClearOverlap)
                     || matches!(
                         p.operation(),
                         Some(
@@ -586,7 +667,7 @@ impl WindowWorker {
                 .cancel_before
                 .store(request.id, Ordering::Release);
             queue.retain(|p| {
-                matches!(p, Pending::Audio(..))
+                matches!(p, Pending::Audio(..) | Pending::ClearOverlap)
                     || matches!(
                         p.operation(),
                         Some(WindowOperation::Acquire(_) | WindowOperation::BeginEdit { .. })
@@ -726,7 +807,7 @@ impl WindowWorker {
             .compare_exchange(session, 0, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
         {
-            queue.retain(|p| matches!(p, Pending::Audio(..)));
+            queue.retain(|p| matches!(p, Pending::Audio(..) | Pending::ClearOverlap));
             // Wake the owner to release retained native references and undo
             // snapshots immediately, including when no operation is active.
             queue.push_back(Pending::Window {
@@ -775,6 +856,7 @@ struct Session {
     initial: std::collections::BTreeMap<WindowId, Snapshot>,
     changed_windows: std::collections::BTreeSet<WindowId>,
     cycle: Vec<WindowId>,
+    overlap: Option<Box<OverlapCache>>,
     edit: Option<EditTransaction>,
     screens: Vec<Screen>,
     minimums: std::collections::BTreeMap<WindowId, Point>,
@@ -1173,8 +1255,13 @@ impl Session {
                 if cancelled() {
                     return Ok(());
                 }
-                let component =
-                    overlapping.then(|| overlapping_component(&windows, self.target, cancelled));
+                if overlapping {
+                    self.overlap.get_or_insert_with(Box::default).prepare(
+                        &windows,
+                        self.target,
+                        cancelled,
+                    );
+                }
                 // Activation changes native Z-order. Preserve the session's
                 // existing ring so successive Tabs visit every window instead
                 // of oscillating between the two most recently activated ones.
@@ -1246,9 +1333,13 @@ impl Session {
                         {
                             continue;
                         }
-                        if component.as_ref().is_some_and(|members| {
-                            Some(id) == self.target || !members.contains(&id)
-                        }) {
+                        if overlapping
+                            && (Some(id) == self.target
+                                || self
+                                    .overlap
+                                    .as_ref()
+                                    .is_none_or(|cache| !cache.contains(id)))
+                        {
                             continue;
                         }
                         match access.snapshot(id, screens) {
@@ -3268,6 +3359,173 @@ mod tests {
                 run(&mut session, &mut access, operation).target.unwrap().id,
                 WindowId(4)
             );
+        }
+    }
+
+    #[test]
+    fn overlap_cache_reuses_geometry_across_focus_and_title_changes_without_allocations() {
+        let mut windows: Vec<_> = Fake::new(64)
+            .windows
+            .into_values()
+            .map(|s| s.info)
+            .collect();
+        for window in &mut windows {
+            window.bounds = Rect::new(0.0, 0.0, 100.0, 100.0);
+        }
+        let mut cache = OverlapCache::default();
+        cache.prepare(&windows, Some(WindowId(1)), &|| false);
+        assert_eq!(cache.comparisons, 63); // Fully stacked windows need n - 1 checks.
+        windows.reverse(); // Native activation reorders inventory.
+        windows[0].title = "changed title".into();
+        cache.prepare(&windows, Some(WindowId(64)), &|| false);
+        let region = stats_alloc::Region::new(crate::TEST_ALLOCATOR);
+        for id in 1..=64 {
+            windows.rotate_left(1);
+            cache.prepare(&windows, Some(WindowId(id)), &|| false);
+            assert!(cache.contains(WindowId(id)));
+        }
+        let allocations = region.change();
+        assert_eq!(allocations.allocations, 0);
+        assert_eq!(allocations.reallocations, 0);
+        assert_eq!(cache.comparisons, 63); // No further intersection calculations.
+        windows
+            .iter_mut()
+            .find(|w| w.id == WindowId(64))
+            .unwrap()
+            .bounds
+            .x = 500.0;
+        cache.prepare(&windows, Some(WindowId(1)), &|| false);
+        assert!(!cache.contains(WindowId(64)));
+        cache.prepare(&windows, Some(WindowId(64)), &|| false);
+        assert_eq!(cache.members, [WindowId(64)]);
+    }
+
+    #[test]
+    fn overlap_cache_invalidates_each_geometry_field_and_external_growth() {
+        let mut windows: Vec<_> = Fake::new(2).windows.into_values().map(|s| s.info).collect();
+        windows[0].bounds = Rect::new(0.0, 0.0, 100.0, 100.0);
+        let connected = Rect::new(-75.0, -75.0, 100.0, 100.0);
+        for disconnected in [
+            Rect::new(-100.0, -75.0, 100.0, 100.0), // x only
+            Rect::new(-75.0, -100.0, 100.0, 100.0), // y only
+            Rect::new(-75.0, -75.0, 75.0, 100.0),   // width only
+            Rect::new(-75.0, -75.0, 100.0, 75.0),   // height only
+        ] {
+            let mut cache = OverlapCache::default();
+            for (bounds, expected) in [(connected, true), (disconnected, false), (connected, true)]
+            {
+                windows[1].bounds = bounds;
+                cache.prepare(&windows, Some(WindowId(1)), &|| false);
+                assert_eq!(cache.contains(WindowId(2)), expected, "{bounds:?}");
+            }
+        }
+        // A previously disjoint window maximizes, then restores externally.
+        let mut cache = OverlapCache::default();
+        for (bounds, maximized, expected) in [
+            (Rect::new(500.0, 500.0, 100.0, 100.0), false, false),
+            (Rect::new(0.0, 0.0, 1920.0, 1080.0), true, true),
+            (Rect::new(500.0, 500.0, 100.0, 100.0), false, false),
+        ] {
+            windows[1].bounds = bounds;
+            windows[1].maximized = maximized;
+            cache.prepare(&windows, Some(WindowId(1)), &|| false);
+            assert_eq!(cache.contains(WindowId(2)), expected);
+        }
+    }
+
+    #[test]
+    fn ordinary_window_cycles_never_allocate_overlap_state() {
+        let mut session = Session::default();
+        let mut access = Fake::new(3);
+        assert!(session.overlap.is_none());
+        for operation in [
+            WindowOperation::CycleActive { backwards: false },
+            WindowOperation::CyclePrevious,
+        ] {
+            run(&mut session, &mut access, operation);
+            assert!(session.overlap.is_none());
+        }
+        run(
+            &mut session,
+            &mut access,
+            WindowOperation::CycleOverlapping { backwards: false },
+        );
+        assert!(session.overlap.is_some());
+    }
+
+    #[test]
+    fn overlap_cache_releases_historic_peak_capacity() {
+        let mut windows: Vec<_> = Fake::new(256)
+            .windows
+            .into_values()
+            .map(|s| s.info)
+            .collect();
+        let mut cache = OverlapCache::default();
+        cache.prepare(&windows, Some(WindowId(1)), &|| false);
+        assert_eq!(cache.members.len(), 256);
+        windows.truncate(1);
+        cache.prepare(&windows, Some(WindowId(1)), &|| false);
+        assert_eq!(cache.members, [WindowId(1)]);
+        assert!(cache.inventory.capacity() <= 2);
+        assert!(cache.queue.capacity() <= 2);
+        assert!(cache.members.capacity() <= 2);
+    }
+
+    #[test]
+    fn overlap_cache_cancellation_does_not_reuse_partial_component() {
+        let windows: Vec<_> = Fake::new(4).windows.into_values().map(|s| s.info).collect();
+        let mut cache = OverlapCache::default();
+        cache.prepare(&windows, Some(WindowId(1)), &|| true);
+        assert!(cache.members.is_empty());
+        cache.prepare(&windows, Some(WindowId(1)), &|| false);
+        assert_eq!(cache.members.len(), 4);
+        cache.prepare(&windows, None, &|| false);
+        assert!(cache.members.is_empty());
+    }
+
+    #[test]
+    fn overlap_cache_matches_transitive_closure_across_inventory_changes() {
+        let mut windows: Vec<_> = Fake::new(12)
+            .windows
+            .into_values()
+            .map(|s| s.info)
+            .collect();
+        let mut cache = OverlapCache::default();
+        let mut seed = 123_u32;
+        for _ in 0..32 {
+            for window in &mut windows {
+                seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                window.bounds = Rect::new(
+                    (seed % 500) as f64,
+                    ((seed >> 16) % 500) as f64,
+                    100.0,
+                    100.0,
+                );
+            }
+            let mut reachable = [[false; 12]; 12];
+            for i in 0..12 {
+                for j in 0..12 {
+                    reachable[i][j] =
+                        i == j || windows[i].bounds.intersect(&windows[j].bounds).is_some();
+                }
+            }
+            for k in 0..12 {
+                for i in 0..12 {
+                    for j in 0..12 {
+                        reachable[i][j] |= reachable[i][k] && reachable[k][j];
+                    }
+                }
+            }
+            for i in 0..12 {
+                cache.prepare(&windows, Some(windows[i].id), &|| false);
+                for j in 0..12 {
+                    assert_eq!(cache.contains(windows[j].id), reachable[i][j]);
+                }
+            }
+            windows.pop();
+            cache.prepare(&windows, Some(windows[0].id), &|| false);
+            assert!(!cache.contains(WindowId(12)));
+            windows.push(Fake::new(12).windows.remove(&WindowId(12)).unwrap().info);
         }
     }
 

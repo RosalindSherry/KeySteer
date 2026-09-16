@@ -7,6 +7,25 @@ fn chord_test_engine(config: &Config) -> Engine {
 }
 
 #[test]
+fn overlap_disabled_plan_blocks_requests_and_reload_releases_cache() {
+    let config = Config::parse("[normal.bindings]\nx = \"window_overlap_next\"").unwrap();
+    let mut engine = chord_test_engine(&config);
+    let (mut backend, log) = FakeBackend::new(vec![]);
+    engine.screens = backend.screens().unwrap();
+    let disabled = crate::app::configuration::compile(&Config::default()).unwrap();
+    engine.apply_runtime_plan(disabled, &mut backend).unwrap();
+    assert_eq!(log.lock().unwrap().overlap_cache_clears, 1);
+    engine
+        .execute_for(
+            &ModeId::normal(),
+            [Command::CycleOverlappingWindow { backwards: false }],
+            &mut backend,
+        )
+        .unwrap();
+    assert!(log.lock().unwrap().window_requests.is_empty());
+}
+
+#[test]
 fn overlapping_window_verbs_are_compiled_host_actions_without_window_ui() {
     let config = Config::parse(
         r#"

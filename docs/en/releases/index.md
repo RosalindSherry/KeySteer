@@ -1,5 +1,9 @@
 # Release notes
 
+## 0.10.16
+
+- Improved overlapping-window switching (`window_overlap_next` / `window_overlap_previous`) with less repeated work.
+
 ## 0.10.15
 
 - Added configurable `window_overlap_next` / `window_overlap_previous` actions to switch between overlapping windows from Normal mode and center the pointer on the selected window.

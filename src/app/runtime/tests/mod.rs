@@ -47,6 +47,7 @@ struct Recorder {
     audio_requests: Vec<crate::api::audio::AudioRequest>,
     cancelled_audio_sessions: Vec<u64>,
     window_requests: Vec<crate::api::window::WindowRequest>,
+    overlap_cache_clears: usize,
     cancelled_window_sessions: Vec<u64>,
     character_bindings: Vec<Vec<String>>,
     window_moves: Vec<crate::api::command::WindowScreenTarget>,
@@ -137,6 +138,9 @@ impl Backend for FakeBackend {
         log.timeline.push("window");
         log.window_requests.push(request);
         Ok(())
+    }
+    fn clear_window_overlap_cache(&mut self) {
+        self.log.lock().unwrap().overlap_cache_clears += 1;
     }
     fn cancel_window_session(&mut self, session: u64) {
         self.log

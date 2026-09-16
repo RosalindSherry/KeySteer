@@ -20,6 +20,7 @@ pub struct DebugSettings {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EngineSettings {
+    pub window_overlap_enabled: bool,
     pub debug: DebugSettings,
     pub excluded_apps: Vec<String>,
     pub resolved_key_aliases: BTreeMap<String, String>,

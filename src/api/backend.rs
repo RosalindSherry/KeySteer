@@ -121,6 +121,9 @@ pub trait Backend {
     /// Discard queued requests. An already executing native change may finish.
     fn cancel_audio_session(&mut self, _session: u64) {}
 
+    /// Release optional overlap state without starting an unused window worker.
+    fn clear_window_overlap_cache(&mut self) {}
+
     fn request_window(&mut self, _request: super::window::WindowRequest) -> Result<(), String> {
         Err("window management is not supported by this backend".into())
     }
