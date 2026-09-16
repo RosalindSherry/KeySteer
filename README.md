@@ -1,4 +1,4 @@
-[下载体验](https://github.com/dccif/KeySteer/releases/latest) · [快速上手](https://dccif.github.io/KeySteer/guide/getting-started) · [Window 操作指南](https://dccif.github.io/KeySteer/modes/window) · [在线模拟器](https://dccif.github.io/KeySteer/editor/)
+[快速上手](https://dccif.github.io/KeySteer/guide/getting-started) · [Window 操作指南](https://dccif.github.io/KeySteer/modes/window) · [在线模拟器](https://dccif.github.io/KeySteer/editor/)
 
 ## 个性化改动
 
