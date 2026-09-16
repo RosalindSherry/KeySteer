@@ -14,4 +14,4 @@
 
 ## 操作视频
 
-[▶ 点击查看操作视频（MP4）](assets/demo/window-stack-cycle.mp4)
+https://github.com/user-attachments/assets/9fdbfbc7-b5ff-4749-821e-3c9cc5de3739
