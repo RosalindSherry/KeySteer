@@ -1,11 +1,32 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { LATEST_RELEASE_URL, parseLatestRelease } from '../latest-release.ts'
+import { fetchLatestRelease, LATEST_RELEASE_URL, parseLatestRelease } from '../latest-release.ts'
 
 const targets = [
   'x86_64-pc-windows-msvc',
   'aarch64-apple-darwin',
 ] as const
+
+test('build fetch uses the supplied signal and token and resolves fresh release metadata', async (context) => {
+  const signal = new AbortController().signal
+  let requests = 0
+  context.mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
+    assert.equal(url, 'https://api.github.com/repos/dccif/KeySteer/releases/latest')
+    assert.equal(init.signal, signal)
+    assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-build-token')
+    requests += 1
+    return Response.json({ tag_name: `v1.2.${requests}`, assets: [] })
+  })
+  assert.equal((await fetchLatestRelease(targets, signal, 'test-build-token')).tag, 'v1.2.1')
+  assert.equal((await fetchLatestRelease(targets, signal, 'test-build-token')).tag, 'v1.2.2')
+})
+
+test('build fetch fails on API errors or invalid metadata instead of inventing a version', async (context) => {
+  const request = context.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 403 }))
+  await assert.rejects(fetchLatestRelease(targets), /HTTP 403/)
+  request.mock.mockImplementation(async () => Response.json({ assets: [] }))
+  await assert.rejects(fetchLatestRelease(targets), /no valid release tag/)
+})
 
 test('uses the latest release tag and actual GitHub asset URLs', () => {
   const release = parseLatestRelease({

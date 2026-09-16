@@ -1,5 +1,14 @@
 import vueJsx from '@vitejs/plugin-vue-jsx'
 import { withMermaid } from 'vitepress-plugin-mermaid'
+import { DOWNLOAD_TARGETS, fetchLatestRelease } from './latest-release.ts'
+
+// Resolve once for this build, shared by SSR and browser bundles. Never expose
+// the build token or require visitors to query the GitHub API.
+const latestRelease = await fetchLatestRelease(
+  DOWNLOAD_TARGETS,
+  AbortSignal.timeout(15_000),
+  process.env.GITHUB_TOKEN,
+)
 
 const base = process.env.KEYSTEER_DOCS_BASE || '/'
 const windowSidebar = (prefix = '', english = false) => ({
@@ -111,6 +120,9 @@ export default withMermaid({
     ['script', {}, languageStateScript],
   ],
   vite: {
+    define: {
+      __KEYSTEER_LATEST_RELEASE__: JSON.stringify(latestRelease),
+    },
     plugins: [vueJsx()],
     ssr: {
       noExternal: ['vitepress-plugin-mermaid', 'mermaid'],

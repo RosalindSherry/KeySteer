@@ -1,6 +1,13 @@
 export const RELEASES_URL = 'https://github.com/dccif/KeySteer/releases'
 export const LATEST_RELEASE_URL = `${RELEASES_URL}/latest`
 
+export const DOWNLOAD_TARGETS = [
+  'x86_64-pc-windows-msvc',
+  'aarch64-pc-windows-msvc',
+  'aarch64-apple-darwin',
+  'x86_64-apple-darwin',
+] as const
+
 const LATEST_RELEASE_API = 'https://api.github.com/repos/dccif/KeySteer/releases/latest'
 
 interface GitHubReleaseAsset {
@@ -62,15 +69,19 @@ export function parseLatestRelease(value: unknown, targets: readonly string[]): 
 export async function fetchLatestRelease(
   targets: readonly string[],
   signal?: AbortSignal,
-): Promise<LatestRelease | undefined> {
+  token?: string,
+): Promise<LatestRelease> {
   const response = await fetch(LATEST_RELEASE_API, {
     headers: {
       Accept: 'application/vnd.github+json',
       'X-GitHub-Api-Version': '2022-11-28',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     signal,
   })
 
-  if (!response.ok) return undefined
-  return parseLatestRelease(await response.json(), targets)
+  if (!response.ok) throw new Error(`GitHub latest release request failed: HTTP ${response.status}`)
+  const release = parseLatestRelease(await response.json(), targets)
+  if (!release) throw new Error('GitHub latest release response has no valid release tag')
+  return release
 }

@@ -40,6 +40,7 @@ jobs:
       - name: Build VitePress site
         env:
           KEYSTEER_DOCS_BASE: /KeySteer/
+          GITHUB_TOKEN: ${{ github.token }}
         run: pnpm docs:build
 
       # upload-pages-artifact@v4 internally uses the Node 20 upload action.

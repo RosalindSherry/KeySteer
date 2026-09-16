@@ -220,11 +220,14 @@ GitHub Pages。需要更新线上文档时，在 Actions 页面运行 `Deploy do
   直接使用仓库固定的 TypeScript 可避免 `vue-tsc` 对编译器私有子路径的版本耦合。
 - `pnpm docs:build`：同步静态资源后生产构建。
 
-`scripts/sync-doc-assets.mjs` 只复制文档站需要的 default TOML/icon。首页下载组件在浏览器
-挂载后调用 GitHub 的 latest release API，从返回的 `tag_name`、Release URL 和真实
-`browser_download_url` 解析版本及四个平台资产；Cargo 版本或 Release 变化不需要重新构建
-GitHub Pages。API 暂时不可用、限流或某个平台资产缺失时，下载入口降级到 latest Release
-页面，不保留构建时的旧 tag 直链。
+`scripts/sync-doc-assets.mjs` 只复制文档站需要的 default TOML/icon。VitePress 配置在每次
+构建/开发服务器启动时查询 GitHub latest release API（15 秒超时），从 `tag_name`、Release URL
+和真实 `browser_download_url` 获取最新正式发布信息，通过 Vite define 同时注入 SSR 和浏览器包。
+DownloadSection 首屏直接包含版本和下载地址，浏览器不再请求版本 API；缺失的平台资产链接到
+本轮 Release 页面，不推测文件名或使用 Cargo 中尚未发布的版本。Pages 构建使用 github.token，
+本地可设置 GITHUB_TOKEN；token 仅用于构建请求，不进入注入数据。API 失败或元数据无效时构建失败，
+不发布空版本或过期回退。Pages 仍按 workflow_dispatch 手动部署，每次运行自动解析当时最新正式版，
+无需修改组件或 workflow 中的版本号；后续新 Release 需要重新运行 Pages 才更新已部署静态页面。
 
 模拟器重点是键位和 Grid/Recursive Grid/UI Hint 样式可视化，不是完整 Rust runtime。它：
 
