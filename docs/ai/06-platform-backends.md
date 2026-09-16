@@ -1,5 +1,9 @@
 # Windows 与 macOS 原生后端
 
+macOS 不存在 GA_ROOTOWNER；对应漏识别修复位于 `accessibility::window_under_pointer` 的有界 AX 关系回退。`is_ordinary_ax_window` 由命中与枚举共用：必须明确为 AXWindow，允许 AXSubrole 缺失，已知非 AXStandardWindow 子角色仍拒绝。枚举继续使用 Quartz 可见元数据匹配，不扩大到隐藏／其他 Space 的窗口；AX 拒绝访问或应用完全不提供可访问性时不承诺可操作。
+
+`ordinary_window_target` / `scannable_target` 共用可见目标归一化：优先可见且未 cloaked 的 root owner；隐藏／cloaked bookkeeping owner 不得吞掉可见应用窗口，回退到 parent-chain 顶层（GA_ROOT），避免把命中的子控件当作应用窗口。原有 shell、自身进程、透明、最小化等过滤继续作用于最终目标；`normalize_root_owner` 保持真实归属语义，供 popup 关系等查询使用。
+
 独立 `CycleActive` 请求由现有 window worker 异步处理，复用 `Cycle` / `CyclePrevious`
 的稳定环和激活逻辑。独立环不占用编辑会话，每次枚举后优先读取鼠标命中窗口，无候选时回退系统前台身份。
 Normal 使用完整候选环：已有标签组按成员顺序相邻，未合并同屏同程序窗口相邻；不能截断为组内环，也不能每次 warp 后围绕当前程序重新旋转，否则连续切换会困在同程序。Window 模式保留已有标签组的组内循环。

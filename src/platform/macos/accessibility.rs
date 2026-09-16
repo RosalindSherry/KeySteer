@@ -157,31 +157,93 @@ pub(super) fn window_under_pointer(
     let Some(hit) = hit else {
         return Ok(None);
     };
-    let window = if copy_string_attribute(hit.as_ptr(), &CFString::new("AXRole")).as_deref()
-        == Some("AXWindow")
-    {
-        hit
-    } else {
-        let Some(window) = copy_attribute(hit.as_ptr(), &CFString::new("AXWindow")) else {
-            return Ok(None);
-        };
-        window
+    let lookup = ContainingWindowLookup {
+        cursor,
+        deadline: Instant::now() + Duration::from_millis(250),
+        attributes: AxAttributes::new(),
+        window: CFString::new("AXWindow"),
+        top_level: CFString::new("AXTopLevelUIElement"),
+        parent: CFString::new("AXParent"),
+        minimized: CFString::new("AXMinimized"),
     };
-    if !is_ax_element(window.as_ptr()) {
+    let Some(window) = crate::platform::common::accessibility_window::resolve(&lookup, hit) else {
         return Ok(None);
-    }
-    // SAFETY: the retained AX window is live; every later message is bounded.
-    let error = unsafe { AXUIElementSetMessagingTimeout(window.as_ptr(), NODE_TIMEOUT_SECONDS) };
-    if error != AX_OK {
-        return Err(format!(
-            "cannot set window messaging timeout: AXError {error}"
-        ));
-    }
+    };
     Ok(Some(MovableWindow {
         window,
-        attributes: AxAttributes::new(),
+        attributes: lookup.attributes,
         fullscreen: CFString::new("AXFullScreen"),
     }))
+}
+
+struct ContainingWindowLookup {
+    cursor: crate::api::Point,
+    deadline: Instant,
+    attributes: AxAttributes,
+    window: CFString,
+    top_level: CFString,
+    parent: CFString,
+    minimized: CFString,
+}
+
+impl crate::platform::common::accessibility_window::Lookup for ContainingWindowLookup {
+    type Node = OwnedCf;
+    fn expired(&self) -> bool {
+        Instant::now() >= self.deadline
+    }
+    fn same(&self, left: &OwnedCf, right: &OwnedCf) -> bool {
+        // SAFETY: both retained CF objects are live during this comparison.
+        unsafe { core_foundation::base::CFEqual(left.as_ptr(), right.as_ptr()) != 0 }
+    }
+    fn usable(&self, node: &OwnedCf) -> bool {
+        if !is_ax_element(node.as_ptr()) || self.expired() {
+            return false;
+        }
+        // SAFETY: type-checked retained AX object; install a finite timeout
+        // before querying even the first hit/ancestor's role.
+        if unsafe { AXUIElementSetMessagingTimeout(node.as_ptr(), NODE_TIMEOUT_SECONDS) } != AX_OK {
+            return false;
+        }
+        copy_string_attribute(node.as_ptr(), &self.attributes.role).as_deref() == Some("AXWindow")
+            && !self.expired()
+            && copy_bool_attribute(node.as_ptr(), &self.attributes.hidden) != Some(true)
+            && !self.expired()
+            && copy_bool_attribute(node.as_ptr(), &self.minimized) != Some(true)
+            && !self.expired()
+            && element_rect(node.as_ptr(), &self.attributes)
+                .is_some_and(|bounds| bounds.contains(&self.cursor))
+    }
+    fn related(
+        &self,
+        node: &OwnedCf,
+        link: crate::platform::common::accessibility_window::Link,
+    ) -> Option<OwnedCf> {
+        use crate::platform::common::accessibility_window::Link;
+        if !is_ax_element(node.as_ptr()) || self.expired() {
+            return None;
+        }
+        // SAFETY: the source is a live AX element; failure must not leave
+        // relationship queries using the application's unbounded default.
+        if unsafe { AXUIElementSetMessagingTimeout(node.as_ptr(), NODE_TIMEOUT_SECONDS) } != AX_OK {
+            return None;
+        }
+        copy_attribute(
+            node.as_ptr(),
+            match link {
+                Link::Window => &self.window,
+                Link::TopLevel => &self.top_level,
+                Link::Parent => &self.parent,
+            },
+        )
+        .filter(|value| is_ax_element(value.as_ptr()))
+    }
+}
+
+fn is_ordinary_ax_window(window: AXUIElementRef) -> bool {
+    crate::platform::common::accessibility_window::ordinary_role(
+        copy_string_attribute(window, &CFString::new("AXRole")).as_deref(),
+        copy_string_attribute(window, &CFString::new("AXSubrole")).as_deref(),
+    )
 }
 
 pub(super) struct MovableWindow {

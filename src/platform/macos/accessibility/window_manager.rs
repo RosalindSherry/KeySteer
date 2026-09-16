@@ -576,9 +576,7 @@ impl WindowAccess for MacWindows {
         {
             return Ok(None);
         }
-        if copy_string_attribute(window.window.as_ptr(), &CFString::new("AXSubrole")).as_deref()
-            != Some("AXStandardWindow")
-        {
+        if !is_ordinary_ax_window(window.window.as_ptr()) {
             return Ok(None);
         }
         self.retain(window, pid, screens).map(Some)
@@ -639,9 +637,7 @@ impl WindowAccess for MacWindows {
                 if install_window_timeout(&owned).is_err() {
                     continue;
                 }
-                if copy_string_attribute(owned.as_ptr(), &CFString::new("AXSubrole")).as_deref()
-                    != Some("AXStandardWindow")
-                {
+                if !is_ordinary_ax_window(owned.as_ptr()) {
                     continue;
                 }
                 let window = MovableWindow {

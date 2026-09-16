@@ -1658,6 +1658,13 @@ pub(crate) fn root_owner(hwnd: HWND) -> HWND {
 }
 
 #[inline(always)]
+pub(crate) fn root_window(hwnd: HWND) -> HWND {
+    use windows::Win32::UI::WindowsAndMessaging::{GA_ROOT, GetAncestor};
+    // SAFETY: synchronous parent-chain query; neither borrowed HWND is retained.
+    unsafe { GetAncestor(hwnd, GA_ROOT) }
+}
+
+#[inline(always)]
 pub(crate) fn desktop_window() -> HWND {
     use windows::Win32::UI::WindowsAndMessaging::GetDesktopWindow;
 

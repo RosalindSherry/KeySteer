@@ -16,8 +16,10 @@ Engine 成功执行跨屏 MovePointer/WarpPointer 后立即派发 PointerMoved�
 
 ## 性能与取消约束（2026-08）
 
+macOS 窗口命中通过 `common/accessibility_window::resolve` 优先验证命中对象与 AXWindow，再回退 AXTopLevelUIElement / AXParent。最多 16 个不同对象、250ms 检查截止时间，每次 AX 调用设 50ms 超时（正在执行的有界属性查询可能越过截止点）；用 CFEqual 防止关系环。只返回 AXWindow 且未明确隐藏／最小化、几何包含鼠标的对象；sheet/drawer 继续找其所属窗口。直接命中有效窗口不读取关系，CF 引用由 OwnedCf 管理，失败不改用任意前台窗口。
+
 - Windows UIA 以内部 generation/stopping flag 做逐节点取消检查；鼠标目标 HWND/PID/边界每 32 个节点采样一次，并在发布 partial 和 terminal 前强制复核。
-- Windows 在 Backend 真正提交请求时解析鼠标下窗口，不依赖 Mode 较早保存的焦点快照。`WindowFromPoint` 是无分配快速路径，控件/子窗口经 `GetAncestor(GA_ROOTOWNER)` 归一到窗口组；命中 KeySteer overlay、桌面或任务栏时才用一次 `EnumWindows` 回退。
+- Windows 在 Backend 真正提交请求时解析鼠标下窗口，不依赖 Mode 较早保存的焦点快照。`WindowFromPoint` 是无分配快速路径，控件/子窗口优先经 `GA_ROOTOWNER` 归一到可见且未 cloaked 的窗口组；owner 隐藏或 cloaked 时经 `GA_ROOT` 回退到可见顶层窗口，不能返回原始子控件。可见性每个候选只查一次，其他普通窗口过滤仍生效。命中 KeySteer overlay、桌面或任务栏时才用一次 `EnumWindows` 回退。
 - 两个平台使用同一个纯计数 `PartialBatcher`：第一批 24 项，随后按累计数量
   48、96、192……发布，terminal 立即补齐；没有 16ms 条件或刷新率依赖。结果进入带内部
   generation 的 latest-only mailbox。Engine 忙时合并当前扫描的

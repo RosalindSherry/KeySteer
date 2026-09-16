@@ -731,19 +731,49 @@ pub(super) fn scannable_target(hwnd: HWND) -> Option<(HWND, u32, Rect)> {
     ordinary_window_target(hwnd, false)
 }
 
+fn visible_target_root(hwnd: HWND) -> Option<HWND> {
+    visible_target_root_with(
+        hwnd,
+        normalize_root_owner,
+        super::native::root_window,
+        |window| super::native::is_window_visible(window) && !is_cloaked(window),
+    )
+}
+
+fn visible_target_root_with(
+    hwnd: HWND,
+    owner: impl FnOnce(HWND) -> HWND,
+    parent_root: impl FnOnce(HWND) -> HWND,
+    mut visible: impl FnMut(HWND) -> bool,
+) -> Option<HWND> {
+    if hwnd.is_invalid() {
+        return None;
+    }
+    let root = owner(hwnd);
+    if !root.is_invalid() && visible(root) {
+        return Some(root);
+    }
+    if root == hwnd {
+        return None;
+    }
+    // A visible application may be owned by a hidden bookkeeping window.
+    // WindowFromPoint can return a child control, so fall back through parents
+    // (GA_ROOT), never to that child. Keep raw ownership queries unchanged.
+    let top = parent_root(hwnd);
+    (!top.is_invalid() && top != root && visible(top)).then_some(top)
+}
+
 pub(super) fn ordinary_window_target(
     hwnd: HWND,
     include_minimized: bool,
 ) -> Option<(HWND, u32, Rect)> {
-    let hwnd = normalize_root_owner(hwnd);
+    let hwnd = visible_target_root(hwnd)?;
     let desktop = super::native::desktop_window();
     let valid = super::native::is_window(hwnd);
     if hwnd.is_invalid()
         || hwnd == desktop
         || !valid
-        || !super::native::is_window_visible(hwnd)
         || (!include_minimized && super::native::is_window_iconic(hwnd))
-        || is_cloaked(hwnd)
         || super::native::window_long(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TRANSPARENT.0 != 0
         || class_name_is_shell_surface(hwnd)
     {
@@ -1650,6 +1680,162 @@ mod tests {
     use super::*;
     use crate::api::command::{UiScanStrategy, VisionOptions};
     use stats_alloc::{INSTRUMENTED_SYSTEM, Region};
+
+    #[test]
+    fn visible_target_prefers_owner_and_only_queries_parent_on_fallback() {
+        let child = HWND(1usize as *mut _);
+        let owner = HWND(2usize as *mut _);
+        let mut queries = Vec::new();
+        assert_eq!(
+            visible_target_root_with(
+                child,
+                |_| owner,
+                |_| panic!("visible owner needs no parent query"),
+                |window| {
+                    queries.push(window);
+                    true
+                }
+            ),
+            Some(owner)
+        );
+        assert_eq!(queries, [owner]);
+        assert_eq!(
+            visible_target_root_with(HWND::default(), |_| panic!(), |_| panic!(), |_| panic!()),
+            None
+        );
+        assert_eq!(
+            visible_target_root_with(owner, |_| owner, |_| panic!(), |_| false),
+            None
+        );
+    }
+
+    #[test]
+    fn invisible_owner_falls_back_to_visible_top_level_never_the_child() {
+        let child = HWND(1usize as *mut _);
+        let owner = HWND(2usize as *mut _);
+        let top = HWND(3usize as *mut _);
+        for original in [child, top] {
+            let mut queries = Vec::new();
+            assert_eq!(
+                visible_target_root_with(
+                    original,
+                    |_| owner,
+                    |_| top,
+                    |window| {
+                        queries.push(window);
+                        window == top
+                    }
+                ),
+                Some(top)
+            );
+            assert_eq!(queries, [owner, top]);
+            // Hidden/cloaked top-level windows remain excluded.
+            assert_eq!(
+                visible_target_root_with(original, |_| owner, |_| top, |_| false),
+                None
+            );
+        }
+        assert_eq!(
+            visible_target_root_with(child, |_| owner, |_| owner, |_| false),
+            None
+        );
+        assert_eq!(
+            visible_target_root_with(child, |_| owner, |_| HWND::default(), |_| false),
+            None
+        );
+    }
+
+    #[test]
+    #[ignore = "creates disposable owned native windows without activating them"]
+    fn native_visible_window_with_hidden_owner_preserves_top_level_identity() {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DestroyWindow, SW_SHOWNOACTIVATE, ShowWindow, WS_CAPTION, WS_CHILD,
+            WS_EX_NOACTIVATE, WS_OVERLAPPEDWINDOW, WS_POPUP, WS_THICKFRAME, WS_VISIBLE,
+        };
+        use windows::core::w;
+        struct Owned(HWND);
+        impl Drop for Owned {
+            fn drop(&mut self) {
+                // SAFETY: only destroys the window created on this test thread.
+                unsafe {
+                    let _ = DestroyWindow(self.0);
+                }
+            }
+        }
+        // SAFETY: standard system class, no custom callback or retained Rust data;
+        // all windows belong to this thread and are released in reverse order.
+        let owner = Owned(
+            unsafe {
+                CreateWindowExW(
+                    WS_EX_NOACTIVATE,
+                    w!("STATIC"),
+                    w!("KeySteer hidden owner probe"),
+                    WS_OVERLAPPEDWINDOW,
+                    0,
+                    0,
+                    80,
+                    80,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            }
+            .unwrap(),
+        );
+        // SAFETY: owner remains live; NOACTIVATE avoids changing the user's focus.
+        let top = Owned(
+            unsafe {
+                CreateWindowExW(
+                    WS_EX_NOACTIVATE,
+                    w!("STATIC"),
+                    w!("KeySteer owned window probe"),
+                    WS_POPUP | WS_CAPTION | WS_THICKFRAME | WS_VISIBLE,
+                    0,
+                    0,
+                    80,
+                    80,
+                    Some(owner.0),
+                    None,
+                    None,
+                    None,
+                )
+            }
+            .unwrap(),
+        );
+        // SAFETY: top remains live and owns this disposable child control.
+        let child = Owned(
+            unsafe {
+                CreateWindowExW(
+                    Default::default(),
+                    w!("STATIC"),
+                    w!("child"),
+                    WS_CHILD | WS_VISIBLE,
+                    0,
+                    0,
+                    10,
+                    10,
+                    Some(top.0),
+                    None,
+                    None,
+                    None,
+                )
+            }
+            .unwrap(),
+        );
+        assert_eq!(normalize_root_owner(child.0), owner.0);
+        assert_eq!(visible_target_root(top.0), Some(top.0));
+        assert_eq!(visible_target_root(child.0), Some(top.0));
+        assert_eq!(visible_target_root(owner.0), None);
+        // The fallback must still pass through the ordinary self-process filter.
+        assert!(ordinary_window_target(top.0, false).is_none());
+        // SAFETY: show only our test owner, without taking foreground focus.
+        unsafe {
+            let _ = ShowWindow(owner.0, SW_SHOWNOACTIVATE);
+        }
+        assert_eq!(visible_target_root(top.0), Some(owner.0));
+        assert_eq!(visible_target_root(child.0), Some(owner.0));
+    }
 
     #[test]
     fn completed_com_cancellation_contexts_are_control_flow() {

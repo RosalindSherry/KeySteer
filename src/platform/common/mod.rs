@@ -1,6 +1,9 @@
 //! Infrastructure shared by native backends.
 #![forbid(unsafe_code)]
 
+#[cfg(any(target_os = "macos", test))]
+pub(crate) mod accessibility_window;
+
 pub(crate) mod app_info;
 pub(crate) mod audio_worker;
 pub(crate) mod character_candidates;
