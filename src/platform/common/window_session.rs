@@ -1277,6 +1277,18 @@ impl Session {
                         self.target,
                         cancelled,
                     );
+                    if focus_first
+                        && self
+                            .overlap
+                            .as_ref()
+                            .is_some_and(|cache| cache.members.len() == 1)
+                        && let Some(id) = self.target
+                        && let Ok(snapshot) = access.snapshot(id, screens)
+                    {
+                        result.pointer = Some(snapshot.info.bounds.center());
+                        result.target = Some(snapshot.info);
+                        return Ok(());
+                    }
                 }
                 // Activation changes native Z-order. Preserve the session's
                 // existing ring so successive Tabs visit every window instead
@@ -3670,6 +3682,28 @@ mod tests {
 
         assert_eq!(result.target.unwrap().id, WindowId(2));
         assert_eq!(access.selected.get(), Some(WindowId(2)));
+    }
+
+    #[test]
+    fn focused_overlapping_cycle_centers_pointer_for_single_window() {
+        let mut access = Fake::new(2);
+        access.windows.get_mut(&WindowId(1)).unwrap().info.bounds =
+            Rect::new(0.0, 0.0, 100.0, 80.0);
+        access.windows.get_mut(&WindowId(2)).unwrap().info.bounds =
+            Rect::new(500.0, 500.0, 100.0, 100.0);
+        access.pointer_target = Some(WindowId(2));
+        access.selected.set(Some(WindowId(1)));
+        let mut session = Session::default();
+
+        let result = run(
+            &mut session,
+            &mut access,
+            WindowOperation::CycleFocusedOverlapping { backwards: false },
+        );
+
+        assert_eq!(result.target.unwrap().id, WindowId(1));
+        assert_eq!(result.pointer, Some(Point::new(50.0, 40.0)));
+        assert_eq!(access.selected.get(), Some(WindowId(1)));
     }
 
     #[test]
