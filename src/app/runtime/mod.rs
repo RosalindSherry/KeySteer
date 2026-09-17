@@ -1678,15 +1678,24 @@ impl Engine {
                     }
                 }
                 Command::CycleWindow { backwards }
-                | Command::CycleOverlappingWindow { backwards } => {
-                    let operation = if matches!(command, Command::CycleOverlappingWindow { .. }) {
-                        if !self.settings.window_overlap_enabled {
-                            continue;
-                        }
-                        crate::api::window::WindowOperation::CycleOverlapping { backwards }
-                    } else {
-                        crate::api::window::WindowOperation::CycleActive { backwards }
-                    };
+                | Command::CycleOverlappingWindow { backwards }
+                | Command::CycleFocusedOverlappingWindow { backwards } => {
+                    let operation =
+                        if matches!(command, Command::CycleFocusedOverlappingWindow { .. }) {
+                            if !self.settings.window_overlap_enabled {
+                                continue;
+                            }
+                            crate::api::window::WindowOperation::CycleFocusedOverlapping {
+                                backwards,
+                            }
+                        } else if matches!(command, Command::CycleOverlappingWindow { .. }) {
+                            if !self.settings.window_overlap_enabled {
+                                continue;
+                            }
+                            crate::api::window::WindowOperation::CycleOverlapping { backwards }
+                        } else {
+                            crate::api::window::WindowOperation::CycleActive { backwards }
+                        };
                     backend.request_window(crate::api::window::WindowRequest {
                         scope: None,
                         session: 0,
@@ -1884,9 +1893,15 @@ impl Engine {
 
         match binding {
             Binding::ActivateWindow { backwards }
-            | Binding::ActivateOverlappingWindow { backwards } => {
+            | Binding::ActivateOverlappingWindow { backwards }
+            | Binding::ActivateFocusedOverlappingWindow { backwards } => {
                 let owner = self.registry.active.clone();
-                let command = if matches!(binding, Binding::ActivateOverlappingWindow { .. }) {
+                let command = if matches!(binding, Binding::ActivateFocusedOverlappingWindow { .. })
+                {
+                    Command::CycleFocusedOverlappingWindow {
+                        backwards: *backwards,
+                    }
+                } else if matches!(binding, Binding::ActivateOverlappingWindow { .. }) {
                     Command::CycleOverlappingWindow {
                         backwards: *backwards,
                     }

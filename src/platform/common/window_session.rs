@@ -398,7 +398,10 @@ impl WindowWorker {
         queue.retain(|pending| {
             !matches!(
                 pending.operation(),
-                Some(WindowOperation::CycleOverlapping { .. })
+                Some(
+                    WindowOperation::CycleOverlapping { .. }
+                        | WindowOperation::CycleFocusedOverlapping { .. }
+                )
             ) && !matches!(pending, Pending::ClearOverlap)
         });
         queue.push_back(Pending::ClearOverlap);
@@ -1233,22 +1236,35 @@ impl Session {
             WindowOperation::Cycle
             | WindowOperation::CyclePrevious
             | WindowOperation::CycleActive { .. }
-            | WindowOperation::CycleOverlapping { .. } => {
+            | WindowOperation::CycleOverlapping { .. }
+            | WindowOperation::CycleFocusedOverlapping { .. } => {
                 let standalone = operation.is_standalone_cycle();
-                let overlapping = matches!(operation, WindowOperation::CycleOverlapping { .. });
+                let overlapping = matches!(
+                    operation,
+                    WindowOperation::CycleOverlapping { .. }
+                        | WindowOperation::CycleFocusedOverlapping { .. }
+                );
+                let focus_first =
+                    matches!(operation, WindowOperation::CycleFocusedOverlapping { .. });
                 let backwards = matches!(
                     operation,
                     WindowOperation::CyclePrevious
                         | WindowOperation::CycleActive { backwards: true }
                         | WindowOperation::CycleOverlapping { backwards: true }
+                        | WindowOperation::CycleFocusedOverlapping { backwards: true }
                 );
                 let mut windows = self.enumerate(access, screens, cancelled)?;
                 if standalone {
                     windows.retain(|window| !window.minimized);
-                    self.target = access
+                    let pointer = access
                         .pointer_window(screens)?
-                        .filter(|id| windows.iter().any(|w| w.id == *id))
-                        .or_else(|| access.focused_window(&windows));
+                        .filter(|id| windows.iter().any(|w| w.id == *id));
+                    let focused = access.focused_window(&windows);
+                    self.target = if focus_first {
+                        focused.or(pointer)
+                    } else {
+                        pointer.or(focused)
+                    };
                 } else {
                     result.windows = Some(windows.clone());
                 }
@@ -3629,6 +3645,31 @@ mod tests {
         );
         assert!(result.pointer.is_none() && result.message.is_none());
         assert_eq!(access.selected.get(), Some(WindowId(1)));
+    }
+
+    #[test]
+    fn focused_overlapping_cycle_anchors_at_focus_before_pointer() {
+        let mut access = Fake::new(4);
+        for (id, bounds) in [
+            (1, Rect::new(0.0, 0.0, 100.0, 100.0)),
+            (2, Rect::new(10.0, 10.0, 80.0, 80.0)),
+            (3, Rect::new(500.0, 500.0, 100.0, 100.0)),
+            (4, Rect::new(510.0, 510.0, 80.0, 80.0)),
+        ] {
+            access.windows.get_mut(&WindowId(id)).unwrap().info.bounds = bounds;
+        }
+        access.pointer_target = Some(WindowId(3));
+        access.selected.set(Some(WindowId(1)));
+        let mut session = Session::default();
+
+        let result = run(
+            &mut session,
+            &mut access,
+            WindowOperation::CycleFocusedOverlapping { backwards: false },
+        );
+
+        assert_eq!(result.target.unwrap().id, WindowId(2));
+        assert_eq!(access.selected.get(), Some(WindowId(2)));
     }
 
     #[test]

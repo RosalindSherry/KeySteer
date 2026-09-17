@@ -172,7 +172,8 @@ impl Engine {
 pub fn compile(config: &ConfigFile) -> Result<RuntimePlan, String> {
     fn uses_overlap(binding: &crate::api::Binding) -> bool {
         match binding {
-            crate::api::Binding::ActivateOverlappingWindow { .. } => true,
+            crate::api::Binding::ActivateOverlappingWindow { .. }
+            | crate::api::Binding::ActivateFocusedOverlappingWindow { .. } => true,
             crate::api::Binding::Sequence(actions) => actions.iter().any(uses_overlap),
             _ => false,
         }

@@ -1,0 +1,230 @@
+[general]
+excluded_apps = []
+
+[key_aliases.windows]
+Primary = "left_alt"
+
+[theme.dark]
+surface = "#0A1338FF"
+accent = "#6E82D6FF"
+accent_alt = "#8FA2F0FF"
+on_accent_alt = "#081022FF"
+text = "#E8EEFFFF"
+
+[theme.light]
+surface = "#EEF2FFFF"
+accent = "#465FBCFF"
+accent_alt = "#0B2377FF"
+on_accent_alt = "#F8FAFFFF"
+text = "#17327AFF"
+
+[hotkeys]
+"primary+e" = "normal"
+
+[normal]
+inherits = [ "hotkeys" ]
+passthrough_unbound_keys = true
+long_press_toggle_ms = 500
+auto_release_ms = 0
+
+[normal.bindings]
+x = "window_overlap_next_2"
+c = "window_overlap_previous_2"
+h = "left_click"
+j = "move_left"
+k = "move_down"
+l = "move_right"
+caps_lock = "precision"
+left_shift = "slow"
+m = "wheel_up"
+";" = "middle_click"
+n = "wheel_down"
+g = "toggle"
+f = "grid"
+"primary+f" = "ui_hint"
+"primary+s" = "screen next"
+"primary+d" = "move_window next"
+u = "page_down"
+i = "move_up"
+t = "home"
+y = "end"
+"q esc" = "idle"
+o = "page_up"
+v = "fast"
+z = "mouse_x1"
+a = "mouse_x2"
+b = "right_click"
+"," = "scroll_left"
+"." = "scroll_right"
+"?" = "key_help"
+
+[ui_hint]
+enabled = true
+strategy = "hybrid"
+hint_characters = "asdfghjkl"
+inherits = [ "hotkeys", "normal" ]
+temporary_mode = "normal"
+temporary_mode_keys = [ "primary" ]
+overlap_cycle_key = "shift"
+label_direction = "normal"
+max_depth = 50
+scan_timeout_ms = 2500
+scan_retry_count = 1
+scan_retry_delay_ms = 200
+ignore_clickable_check = false
+visible_check_enabled = false
+placement = "bottom"
+label_x_offset = 0
+label_y_offset = -8
+clickable_roles = [ "button", "menu_button", "popup_button", "combo_box", "link", "checkbox", "radio", "switch", "text_field", "text_area", "search_field", "slider", "stepper", "tab", "menu_item", "cell", "list_item" ]
+
+[ui_hint.lifecycle]
+after_finish = "normal"
+after_click = "normal"
+
+[ui_hint.bindings]
+"primary+r" = "rescan"
+"primary+q" = "normal"
+
+[ui_hint.vision]
+detect_text = true
+detect_rectangles = true
+request_timeout_ms = 5000
+minimum_confidence = 0
+merge_iou_threshold = 0.5
+rectangle_max_candidates = 100
+rectangle_min_size = 0.01
+rectangle_min_aspect = 0.3
+rectangle_max_aspect = 10
+button_min_confidence = 0.3
+button_min_aspect = 0.8
+button_max_aspect = 8
+button_icon_max_size = 48
+link_min_aspect = 5
+link_max_height = 40
+link_min_width = 50
+image_min_size = 48
+checkbox_max_size = 32
+generic_clickable_min_confidence = 0.5
+
+[ui_hint.ui]
+font_size = 17
+font_family = ""
+border_width = 1
+border_radius = -1
+padding_x = -1
+padding_y = -1
+
+[ui_hint.boundary_highlight]
+enabled = false
+border_width = 1
+border_radius = -1
+
+[ui_hint.search_input_ui]
+position = "bottom_center"
+x_offset = 0
+y_offset = 24
+width = 320
+font_size = 14
+
+[grid]
+enabled = true
+grid_cols = 5
+grid_rows = 4
+keys = "12345qwertasdfgzxcvb"
+max_depth = 3
+inherits = [ "hotkeys", "normal" ]
+temporary_mode = "normal"
+temporary_mode_keys = [ "primary" ]
+cursor_follow_selection = true
+
+[grid.lifecycle]
+after_finish = "normal"
+after_click = "finish"
+
+[grid.bindings]
+"`" = "follow"
+"primary+q" = "normal"
+
+[grid.ui]
+font_size = 20
+border_width = 1
+
+[recursive_grid]
+enabled = true
+grid_cols = 3
+grid_rows = 3
+keys = "qweasdzxc"
+min_size_width = 1
+min_size_height = 1
+max_depth = 10
+cursor_follow_selection = true
+inherits = [ "hotkeys", "normal" ]
+temporary_mode = "normal"
+temporary_mode_keys = [ "primary" ]
+
+[recursive_grid.lifecycle]
+after_finish = "keep"
+after_click = "keep"
+
+[recursive_grid.bindings]
+"`" = "follow"
+"primary+q" = "normal"
+
+[recursive_grid.ui]
+font_size = 20
+label_min_font_size = 6
+line_width = 1
+label_background = false
+label_char = ""
+label_autohide_multiplier = 1.5
+sub_key_preview = false
+sub_key_preview_font_size = 8
+sub_key_preview_autohide_multiplier = 1.5
+
+[scroll]
+scroll_step = 50
+scroll_step_half = 500
+scroll_step_full = 1000000
+
+[platform.macos.scroll]
+invert_horizontal = false
+invert_vertical = true
+
+[pointer]
+initial_speed = 500
+max_speed = 800
+acceleration = 1500
+smooth_acceleration = true
+tap_distance = 2.5
+slow_multiplier = 0.35
+precision_multiplier = 0.12
+fast_multiplier = 2
+
+[mode_indicator.cursor]
+enabled = true
+radius = 13
+stroke_width = 2
+left_pressed_color = "#00FF00FF"
+middle_pressed_color = "#FF00FFFF"
+right_pressed_color = "#00FFFFFF"
+
+[mode_indicator.ui]
+font_size = 11
+indicator_x_offset = -12
+indicator_y_offset = 18
+
+[mode_indicator.modes.normal]
+enabled = true
+text = "Normal"
+
+[plugin_modes."plugin:screen-selector".settings]
+preserve = true
+
+[key_help]
+font_family = ""
+font_size = 12
+border_width = 0
+border_radius = 10
+padding_x = 24
+padding_y = 8

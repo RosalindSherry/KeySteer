@@ -63,6 +63,13 @@ fn overlapping_window_verbs_are_compiled_host_actions_without_window_ui() {
 }
 
 #[test]
+fn focused_overlapping_window_verbs_are_canonical() {
+    for verb in ["window_overlap_next_2", "window_overlap_previous_2"] {
+        assert_eq!(Binding::parse(verb).unwrap().canonical(), verb);
+    }
+}
+
+#[test]
 fn standalone_window_verbs_keep_normal_without_window_ui_or_sessions() {
     let config = Config::parse(
         r#"
