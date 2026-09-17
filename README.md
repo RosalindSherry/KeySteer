@@ -57,4 +57,4 @@ C：1 → 3 → 2 → 1
 
 ## 演示视频
 
-<!-- 新版演示视频将在上传后填入此处 -->
+https://github.com/user-attachments/assets/26f906d1-3c07-47b9-a889-b0d4186be9ed
