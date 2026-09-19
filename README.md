@@ -2,7 +2,7 @@
 
 ## 个性化改动
 
-基于 [dccif/KeySteer v0.10.16](https://github.com/dccif/KeySteer/releases/tag/v0.10.16) 修改，增加焦点优先的重叠窗口组快速切换。原项目及原作者：[dccif/KeySteer](https://github.com/dccif/KeySteer)。
+基于 [[dccif/KeySteer v0.10.16](https://github.com/dccif/KeySteer/releases/tag/v0.10.16](https://github.com/dccif/KeySteer/releases)) 修改。原项目及原作者：[dccif/KeySteer](https://github.com/dccif/KeySteer)。
 
 ```toml
 x = "window_overlap_next_2"
