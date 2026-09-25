@@ -270,6 +270,10 @@ pub enum WindowOperation {
     CycleOverlapping {
         backwards: bool,
     },
+    /// Like CycleOverlapping, but the focused window selects the group before pointer fallback.
+    CycleFocusedOverlapping {
+        backwards: bool,
+    },
     /// Standalone focus cycling; session/id are unused and no WindowResult is emitted.
     CycleActive {
         backwards: bool,
@@ -337,7 +341,9 @@ impl WindowOperation {
     pub(crate) fn is_standalone_cycle(&self) -> bool {
         matches!(
             self,
-            Self::CycleActive { .. } | Self::CycleOverlapping { .. }
+            Self::CycleActive { .. }
+                | Self::CycleOverlapping { .. }
+                | Self::CycleFocusedOverlapping { .. }
         )
     }
     pub fn precedes_inventory(&self) -> bool {

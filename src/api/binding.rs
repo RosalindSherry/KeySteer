@@ -202,6 +202,10 @@ pub enum Binding {
     ActivateOverlappingWindow {
         backwards: bool,
     },
+    /// Activate an overlapping peer, anchoring the group at the focused window first.
+    ActivateFocusedOverlappingWindow {
+        backwards: bool,
+    },
     /// Stop the program.
     Quit,
     /// Explicitly unbound: removes an inherited default.
@@ -400,6 +404,11 @@ impl Binding {
         use ScrollAmount::{Full, Half, Step};
 
         Some(match word {
+            "window_overlap_next_2" | "window_overlap_previous_2" => {
+                B::ActivateFocusedOverlappingWindow {
+                    backwards: word == "window_overlap_previous_2",
+                }
+            }
             "window_overlap_next" | "window_overlap_previous" => B::ActivateOverlappingWindow {
                 backwards: word == "window_overlap_previous",
             },
@@ -506,6 +515,12 @@ impl Binding {
                 "window_overlap_previous"
             } else {
                 "window_overlap_next"
+            }
+            .into(),
+            B::ActivateFocusedOverlappingWindow { backwards } => if *backwards {
+                "window_overlap_previous_2"
+            } else {
+                "window_overlap_next_2"
             }
             .into(),
             B::ActivateWindow { backwards } => if *backwards {

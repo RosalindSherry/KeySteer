@@ -138,7 +138,10 @@ impl WindowWorker {
         queue.retain(|pending| {
             !matches!(
                 pending.operation(),
-                Some(WindowOperation::CycleOverlapping { .. })
+                Some(
+                    WindowOperation::CycleOverlapping { .. }
+                        | WindowOperation::CycleFocusedOverlapping { .. }
+                )
             ) && !matches!(pending, Pending::ClearOverlap)
         });
         queue.push_back(Pending::ClearOverlap);
